@@ -1,0 +1,18 @@
+Provider: City of Vienna – Open Government Data
+Licence for all City of Vienna layers: CC BY 4.0 AT
+
+Dataset: Vienna district boundaries (Bezirksgrenzen)
+WFS typeName: ogdwien:BEZIRKSGRENZEOGD
+Source URL: https://data.wien.gv.at/daten/geo?service=WFS&request=GetFeature&version=1.1.0&srsName=EPSG:4326&outputFormat=json&typeName=ogdwien:BEZIRKSGRENZEOGD
+
+Dataset: Vienna pedestrian zones (Fußgängerzonen)
+WFS typeName: ogdwien:FUSSGEHERZONEOGD
+Source URL: https://data.wien.gv.at/daten/geo?service=WFS&request=GetFeature&version=1.1.0&srsName=EPSG:4326&outputFormat=json&typeName=ogdwien:FUSSGEHERZONEOGD
+
+Dataset: Vienna bike path network (Radwege)
+WFS typeName: ogdwien:RADWEGEOGD
+Source URL: https://data.wien.gv.at/daten/geo?service=WFS&request=GetFeature&version=1.1.0&srsName=EPSG:4326&outputFormat=json&typeName=ogdwien:RADWEGEOGD
+
+Note: telemetry coordinates are synthetic (HHAR has no GPS).
+Walk agents start on pedestrian zones, bike agents on bike paths.
+Stand agents use a district reference point.
