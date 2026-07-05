@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.matplotlib_cache/
+data/raw/
+data/processed/
+data/streaming_source/
+data/streaming_checkpoints/
+data/geospatial_streaming_source/
+data/geospatial_streaming_checkpoint/
+.ipynb_checkpoints/
