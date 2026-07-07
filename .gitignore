@@ -1,12 +1,40 @@
-.venv/
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.pyc
-.DS_Store
+*.pyo
+*.pyd
+
+# Jupyter Notebook checkpoints and cache
+.ipynb_checkpoints/
+notebooks/cache/
 .matplotlib_cache/
+
+# Local Python virtual environment
+.venv/
+venv/
+env/
+
+# Environment-specific configuration
+.env
+.DS_Store
+
+# Local log files
+*.log
+
+# Windows Spark WinUtils binaries
+data/winutils/
+
+# Dynamic project data files (generated or downloaded at runtime)
 data/raw/
 data/processed/
+data/spatial/
 data/streaming_source/
 data/streaming_checkpoints/
 data/geospatial_streaming_source/
 data/geospatial_streaming_checkpoint/
-.ipynb_checkpoints/
+data/geospatial_output/
+
+# Parquet files and directories
+*.parquet
+*.parquet/
+
