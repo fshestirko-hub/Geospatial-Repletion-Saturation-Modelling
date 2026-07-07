@@ -34,7 +34,7 @@ def add_synthetic_coordinates(
     telemetry_df: DataFrame,
     anchors_df: DataFrame | None = None,
 ) -> DataFrame:
-    """Add lat/lon columns. Uses per-agent anchors when provided."""
+    """Add lat/lon columns. Uses per-agent anchors and pre-sampled route arrays when provided."""
 
     elapsed_seconds = (col("Timestamp") - lit(BASE_TIMESTAMP_MS)) / lit(1000.0)
 
@@ -45,10 +45,30 @@ def add_synthetic_coordinates(
     )
 
     if anchors_df is not None:
-        positioned_df = telemetry_df.join(anchors_df, on="Agent_ID", how="left")
-        heading_radians = col("heading_radians")
-        start_lat = col("start_lat")
-        start_lon = col("start_lon")
+        positioned_df = telemetry_df.join(anchors_df, on=["Agent_ID", "Activity"], how="left")
+
+        # Check if the anchor dataframe contains pre-calculated route arrays
+        if "route_lats" in positioned_df.columns:
+            from pyspark.sql.functions import element_at, size, least, greatest, floor
+
+            # Convert elapsed seconds to 1-based index (since Spark arrays are 1-indexed)
+            idx = floor(elapsed_seconds).cast("int") + 1
+
+            # Clamp index between 1 and the size of the route array
+            clamped_idx = greatest(lit(1), least(idx, size(col("route_lats"))))
+
+            return (
+                positioned_df
+                .withColumn("Latitude", element_at(col("route_lats"), clamped_idx))
+                .withColumn("Longitude", element_at(col("route_lons"), clamped_idx))
+                .drop("route_lats", "route_lons")
+            )
+
+        else:
+            # Fallback to straight-line if route path is missing in anchors
+            heading_radians = col("heading_radians")
+            start_lat = col("start_lat")
+            start_lon = col("start_lon")
     else:
         positioned_df = telemetry_df
         heading_radians = pmod(col("Agent_ID"), lit(16)) * lit(2.0 * math.pi / 16.0)
@@ -67,6 +87,7 @@ def add_synthetic_coordinates(
         .withColumn("Latitude", start_lat + north_metres / lit(METRES_PER_DEGREE_LAT))
         .withColumn("Longitude", start_lon + east_metres / metres_per_degree_lon)
     )
+
 
 
 def _write_geojson_batch(batch_df: DataFrame, batch_id: int, output_dir: Path) -> None:
@@ -140,10 +161,9 @@ def run_geospatial_streaming_simulation(spark: SparkSession, project_root: Path)
     output_dir = project_root / "data" / "geospatial_output"
 
     if not master_parquet_path.exists():
-        raise FileNotFoundError(
-            f"Synthetic telemetry not found at {master_parquet_path}. "
-            "Run the bootstrapping notebook section first."
-        )
+        from src.create_minimal_telemetry import create_minimal_telemetry
+        create_minimal_telemetry(project_root, num_agents=30, samples_per_agent=500)
+        spark.catalog.clearCache()
 
     for directory in (streaming_source_dir, checkpoint_dir, output_dir):
         if directory.exists():
@@ -153,6 +173,23 @@ def run_geospatial_streaming_simulation(spark: SparkSession, project_root: Path)
     master_df = spark.read.parquet(str(master_parquet_path))
     master_df.repartition(10).write.mode("overwrite").parquet(str(streaming_source_dir))
 
+    # Build anchors to enable street-network routing in the stream
+    from src.vienna_spatial_layers import (
+        build_agent_anchors_spark,
+        download_vienna_layers,
+        load_vienna_bike_paths,
+        load_vienna_districts,
+        load_vienna_pedestrian_zones,
+    )
+    spatial_dir = project_root / "data" / "spatial"
+    layer_paths = download_vienna_layers(spatial_dir)
+    districts_gdf = load_vienna_districts(layer_paths["districts"])
+    pedestrian_gdf = load_vienna_pedestrian_zones(layer_paths["pedestrian_zones"])
+    bike_gdf = load_vienna_bike_paths(layer_paths["bike_paths"])
+    anchors_df = build_agent_anchors_spark(
+        master_df, districts_gdf, pedestrian_gdf, bike_gdf
+    )
+
     telemetry_stream = (
         spark.readStream
         .schema(master_df.schema)
@@ -160,8 +197,7 @@ def run_geospatial_streaming_simulation(spark: SparkSession, project_root: Path)
         .parquet(str(streaming_source_dir))
     )
 
-    geospatial_stream = add_synthetic_coordinates(telemetry_stream)
-
+    geospatial_stream = add_synthetic_coordinates(telemetry_stream, anchors_df)
     query = (
         geospatial_stream.writeStream
         .foreachBatch(lambda df, batch_id: _write_geojson_batch(df, batch_id, output_dir))

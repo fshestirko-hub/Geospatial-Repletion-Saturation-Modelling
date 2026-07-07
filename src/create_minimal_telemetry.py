@@ -32,13 +32,15 @@ def create_minimal_telemetry(
     output_path = project_root / "data" / "processed" / "synthetic_telemetry.parquet"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    spark = (
-        SparkSession.builder
-        .appName("Minimal-Telemetry-Generator")
-        .master("local[*]")
-        .config("spark.driver.memory", "2g")
-        .getOrCreate()
-    )
+    # Clean existing path if it exists to avoid writing conflicts
+    if output_path.exists():
+        import shutil
+        if output_path.is_dir():
+            shutil.rmtree(output_path)
+        else:
+            output_path.unlink()
+
+    import pandas as pd
 
     records = []
     for agent_id in range(num_agents):
@@ -47,38 +49,35 @@ def create_minimal_telemetry(
             timestamp = BASE_TIMESTAMP_MS + sample_idx * 10
             phase = sample_idx / 100.0
             records.append(
-                (
-                    agent_id,
-                    timestamp,
-                    0.1 * phase,
-                    0.2 * phase,
-                    9.8 + 0.05 * phase,
-                    0.01 * phase,
-                    0.02 * phase,
-                    0.03 * phase,
-                    activity,
-                )
+                {
+                    "Agent_ID": int(agent_id),
+                    "Timestamp": int(timestamp),
+                    "ax": float(0.1 * phase),
+                    "ay": float(0.2 * phase),
+                    "az": float(9.8 + 0.05 * phase),
+                    "gx": float(0.01 * phase),
+                    "gy": float(0.02 * phase),
+                    "gz": float(0.03 * phase),
+                    "Activity": str(activity),
+                }
             )
 
-    schema = StructType(
-        [
-            StructField("Agent_ID", LongType(), False),
-            StructField("Timestamp", LongType(), False),
-            StructField("ax", DoubleType(), False),
-            StructField("ay", DoubleType(), False),
-            StructField("az", DoubleType(), False),
-            StructField("gx", DoubleType(), False),
-            StructField("gy", DoubleType(), False),
-            StructField("gz", DoubleType(), False),
-            StructField("Activity", StringType(), False),
-        ]
-    )
+    df = pd.DataFrame(records)
+    
+    # Force specific schemas to match exactly what Spark expects
+    df["Agent_ID"] = df["Agent_ID"].astype("int64")
+    df["Timestamp"] = df["Timestamp"].astype("int64")
+    df["ax"] = df["ax"].astype("float64")
+    df["ay"] = df["ay"].astype("float64")
+    df["az"] = df["az"].astype("float64")
+    df["gx"] = df["gx"].astype("float64")
+    df["gy"] = df["gy"].astype("float64")
+    df["gz"] = df["gz"].astype("float64")
+    df["Activity"] = df["Activity"].astype("string")
 
-    telemetry_df = spark.createDataFrame(records, schema=schema)
-    telemetry_df.write.mode("overwrite").parquet(str(output_path))
+    df.to_parquet(str(output_path), engine="pyarrow", index=False)
 
-    row_count = telemetry_df.count()
-    logging.info("Wrote %s rows to %s", row_count, output_path)
+    logging.info("Wrote %s rows to %s", len(df), output_path)
     return output_path
 
 
