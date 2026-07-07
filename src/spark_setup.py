@@ -15,18 +15,6 @@ JAVA_CANDIDATES = (
 def configure_spark_environment(project_root: Path | None = None) -> str | None:
     """Set JAVA_HOME and MPLCONFIGDIR when they are missing."""
 
-    try:
-        import sys
-        debug_path = Path("c:/Users/fedka/Documents/GitHub/Geospatial Repletion & Saturation Modelling/notebook_debug.log")
-        with open(debug_path, "a", encoding="utf-8") as f:
-            f.write(f"\n--- configure_spark_environment called ---\n")
-            f.write(f"sys.executable: {sys.executable}\n")
-            f.write(f"sys.version: {sys.version}\n")
-            f.write(f"JAVA_HOME initially: {os.environ.get('JAVA_HOME')}\n")
-            f.write(f"PATH first 3: {os.environ.get('PATH', '').split(os.pathsep)[:3]}\n")
-    except Exception as ex:
-        pass
-
     java_home = os.environ.get("JAVA_HOME")
     if not java_home:
         candidates = list(JAVA_CANDIDATES)
@@ -70,14 +58,6 @@ def configure_spark_environment(project_root: Path | None = None) -> str | None:
             pythonpath_entries.insert(0, project_root_path)
             os.environ["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
 
-    try:
-        debug_path = Path("c:/Users/fedka/Documents/GitHub/Geospatial Repletion & Saturation Modelling/notebook_debug.log")
-        with open(debug_path, "a", encoding="utf-8") as f:
-            f.write(f"java_home resolved to: {java_home}\n")
-            f.write(f"JAVA_HOME in env finally: {os.environ.get('JAVA_HOME')}\n")
-            f.write(f"PATH finally: {os.environ.get('PATH')}\n")
-    except Exception:
-        pass
     return java_home
 
 
