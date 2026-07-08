@@ -1,4 +1,4 @@
-"""Geospatial interactive visualizations using Leaflet and Folium without Pandas or GeoPandas."""
+"""Geospatial interactive visualisations using Leaflet and Folium without Pandas or GeoPandas."""
 
 import json
 from pathlib import Path

@@ -54,15 +54,15 @@ def plot_agent_kinematics(spark, synth_df, plots_dir):
         ax1.plot(t, pdf_agent['ax'], label='X axis', color='firebrick', alpha=0.8, linewidth=1.1)
         ax1.plot(t, pdf_agent['ay'], label='Y axis', color='steelblue', alpha=0.8, linewidth=1.1)
         ax1.plot(t, pdf_agent['az'], label='Z axis', color='darkslategray', alpha=0.8, linewidth=1.1)
-        ax1.set_title("synthetic agent kinematic signature: component forces (agent 0 - walk)", fontsize=11, loc='left')
-        ax1.set_ylabel("acceleration (m/s²)", fontsize=9)
+        ax1.set_title("Synthetic agent kinematic signature: component forces (Agent 0 - walk)", fontsize=11, loc='left')
+        ax1.set_ylabel("Acceleration (m/s²)", fontsize=9)
         ax1.legend(loc='upper right', frameon=True)
         
-        ax2.plot(t, pdf_agent['magnitude'], color='#b85a5a', alpha=0.9, linewidth=1.3, label='resultant magnitude')
-        ax2.axhline(y=9.81, color='black', linestyle=':', alpha=0.4, label='earth gravity baseline')
-        ax2.set_title("synthetic agent resultant magnitude profile (verification of smooth boundary transitions)", fontsize=11, loc='left')
-        ax2.set_ylabel("magnitude |a| (m/s²)", fontsize=9)
-        ax2.set_xlabel("continuous streaming sample index (10ms steps)", fontsize=10)
+        ax2.plot(t, pdf_agent['magnitude'], color='#b85a5a', alpha=0.9, linewidth=1.3, label='Resultant magnitude')
+        ax2.axhline(y=9.81, color='black', linestyle=':', alpha=0.4, label='Earth gravity baseline')
+        ax2.set_title("Synthetic agent resultant magnitude profile (verification of smooth boundary transitions)", fontsize=11, loc='left')
+        ax2.set_ylabel("Magnitude |a| (m/s²)", fontsize=9)
+        ax2.set_xlabel("Continuous streaming sample index (10ms steps)", fontsize=10)
         ax2.legend(loc='upper right', frameon=True)
         
         plt.tight_layout()
@@ -120,11 +120,11 @@ def plot_population_density_comparison(spark, phone_df, synth_df, plots_dir):
             linewidth=1.2
         )
         
-        plt.title("population profile verification: empirical vs. synthetic distribution properties", fontsize=11, loc='left')
-        plt.ylabel("absolute acceleration magnitude (m/s²)")
-        plt.xlabel("mode of infrastructure transit activity")
+        plt.title("Population profile verification: empirical vs. synthetic distribution properties", fontsize=11, loc='left')
+        plt.ylabel("Absolute acceleration magnitude (m/s²)")
+        plt.xlabel("Mode of infrastructure transit activity")
         plt.grid(True, linestyle='--', alpha=0.4)
-        plt.legend(title="data vector layer source", loc='upper right', frameon=True)
+        plt.legend(title="Data vector layer source", loc='upper right', frameon=True)
         
         plt.tight_layout()
         plt.savefig(plot_path, dpi=150)
@@ -175,13 +175,13 @@ def plot_temporal_autocorrelation(spark, phone_df, synth_df, plots_dir):
         # Plot the empirical and synthetic autocorrelation coefficients side by side.
         plt.figure(figsize=(10, 4.5))
         lags = np.arange(max_lags)
-        plt.plot(lags, real_acf, label='empirical stride signature (user a)', color='#5c768d', linewidth=1.5)
-        plt.plot(lags, synth_acf, label='synthetic stride signature (agent 0)', color='#b85a5a', linestyle='--', linewidth=1.5)
+        plt.plot(lags, real_acf, label='Empirical stride signature (User \'a\')', color='#5c768d', linewidth=1.5)
+        plt.plot(lags, synth_acf, label='Synthetic stride signature (Agent 0)', color='#b85a5a', linestyle='--', linewidth=1.5)
         
         plt.axhline(y=0, color='black', linestyle='-', alpha=0.2)
-        plt.title("temporal dependency verification: autocorrelation (acf) profile alignment", fontsize=11, loc='left')
-        plt.xlabel("temporal sample lag interval (10ms bins)")
-        plt.ylabel("autocorrelation coefficient (ρ)")
+        plt.title("Temporal dependency verification: autocorrelation (ACF) profile alignment", fontsize=11, loc='left')
+        plt.xlabel("Temporal sample lag interval (10ms bins)")
+        plt.ylabel("Autocorrelation coefficient (ρ)")
         plt.grid(True, linestyle='--', alpha=0.4)
         plt.legend(frameon=True)
         

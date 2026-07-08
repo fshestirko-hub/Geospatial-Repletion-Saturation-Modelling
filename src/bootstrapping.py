@@ -60,7 +60,7 @@ def setup_winutils(workspace_dir: Path):
     logging.info(f"Hadoop environment path configuration active: HADOOP_HOME={hadoop_home}")
 
 
-def run_bootstrapping(num_agents=150, samples_per_agent=10000):
+def run_bootstrapping(num_agents=150, samples_per_agent=50000):
     # Configure paths and directories.
     # Setup filesystem reference targets for source data files and outputs.
     project_root = get_project_root()
@@ -256,7 +256,7 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
             ax, ay, az = np.array(agent_t['ax']) + np.array(agent_r['ax']), np.array(agent_t['ay']) + np.array(agent_r['ay']), np.array(agent_t['az']) + np.array(agent_r['az'])
             gx, gy, gz = np.array(agent_t['gx']) + np.array(agent_r['gx']), np.array(agent_t['gy']) + np.array(agent_r['gy']), np.array(agent_t['gz']) + np.array(agent_r['gz'])
             
-            timestamps = 1700000000000 + np.arange(samples_per_agent) * 10
+            timestamps = 1700000000000 + np.arange(samples_per_agent) * 100
             
             for i in range(samples_per_agent):
                 synthetic_records.append({

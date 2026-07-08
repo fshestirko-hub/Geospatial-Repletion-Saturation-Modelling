@@ -61,8 +61,8 @@ def plot_attractor_geometries(spark, phone_df, plots_dir):
             ax3d.scatter(x_vals, y_vals, z_vals, label=act, color=activity_colors[act], alpha=0.3, s=6)
             
     ax2d.set_title("2D acceleration space projection (X vs Y)", fontsize=11, loc='left')
-    ax2d.set_xlabel("X vector acceleration (m/s²)")
-    ax2d.set_ylabel("Y vector acceleration (m/s²)")
+    ax2d.set_xlabel("X-vector acceleration (m/s²)")
+    ax2d.set_ylabel("Y-vector acceleration (m/s²)")
     ax2d.legend(frameon=True)
     
     ax3d.set_title("3D structural attractor point cloud", fontsize=11, loc='left')
@@ -120,7 +120,7 @@ def plot_multivariate_user_attractors_3d(spark, phone_df, plots_dir):
             user_data['x'], 
             user_data['y'], 
             user_data['z'], 
-            label=f"user '{u}' footprint", 
+            label=f"User '{u}' footprint", 
             color=user_colors[u],
             marker=user_markers[u],
             alpha=0.3,
@@ -128,7 +128,7 @@ def plot_multivariate_user_attractors_3d(spark, phone_df, plots_dir):
             edgecolors='none'
         )
         
-    ax.set_title(f"3D joint multi-user spatial acceleration space (activity: {target_activity})", fontsize=11, loc='left')
+    ax.set_title(f"3D joint multi-user spatial acceleration space (Activity: {target_activity})", fontsize=11, loc='left')
     ax.set_xlabel("X-axis acceleration orientation (m/s²)", fontsize=9)
     ax.set_ylabel("Y-axis acceleration orientation (m/s²)", fontsize=9)
     ax.set_zlabel("Z-axis acceleration orientation (m/s²)", fontsize=9)

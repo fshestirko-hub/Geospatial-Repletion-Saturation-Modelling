@@ -82,7 +82,7 @@ def download_vienna_layers(spatial_dir: Path) -> dict[str, Path]:
                     f.write(content)
             logging.info("Saved %s features to %s", layer_info["english_name"], output_path)
         except Exception as e:
-            logging.error("Failed to download layer %s: %s", layer_key, e)
+            logging.error("Failed to download layer %s: %s", layer_key, e, exc_info=True)
             raise e
 
     return downloaded_paths
@@ -188,7 +188,7 @@ def load_vienna_streets_graph(project_root: Path) -> nx.MultiDiGraph | None:
         try:
             return ox.load_graphml(filepath=graph_path)
         except Exception as e:
-            logging.warning("Failed to load cached graph: %s. Re-downloading...", e)
+            logging.warning("Failed to load cached graph: %s. Re-downloading...", e, exc_info=True)
 
     logging.info("Downloading Vienna walk network graph via OSMnx (one-time cache operation)...")
     try:
@@ -197,7 +197,7 @@ def load_vienna_streets_graph(project_root: Path) -> nx.MultiDiGraph | None:
         logging.info("Saved street graph to %s", graph_path)
         return G
     except Exception as e:
-        logging.error("Failed to download street graph: %s", e)
+        logging.error("Failed to download street graph: %s", e, exc_info=True)
         return None
 
 
@@ -309,7 +309,8 @@ def build_agent_anchor_list(
                     route_lons = [float(start_point.x)]
             except Exception as e:
                 logging.warning(
-                    f"Failed to find route for Agent {agent_id} ({activity}): {e}. Using straight-line fallback."
+                    f"Failed to find route for Agent {agent_id} ({activity}): {e}. Using straight-line fallback.",
+                    exc_info=True
                 )
                 station_lat, station_lon = STATION_COORDS[agent_id % len(STATION_COORDS)]
                 dest_lat, dest_lon = station_lat, station_lon

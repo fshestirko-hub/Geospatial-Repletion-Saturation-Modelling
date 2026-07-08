@@ -25,7 +25,7 @@ pip install -r requirements.txt
 ### Run geospatial notebook
 
 ```text
-notebooks/3_district_assignment.ipynb
+notebooks/3_district_assignment_routed.ipynb
 ```
 
 Needs `data/processed/synthetic_telemetry.parquet` (from bootstrapping). If missing, the notebook creates a small test file.
@@ -35,8 +35,8 @@ Needs `data/processed/synthetic_telemetry.parquet` (from bootstrapping). If miss
 | Notebook | Content |
 |----------|---------|
 | `1_part_master_notebook.ipynb` | EDA, bootstrapping, streaming |
-| `2_geospatial_streaming.ipynb` | GeoJSON export |
-| `3_district_assignment.ipynb` | Spatial joins, maps, CSV output |
+| `2_geospatial_streaming_routed.ipynb` | GeoJSON export |
+| `3_district_assignment_routed.ipynb` | Spatial joins, maps, CSV output |
 
 ## Outputs (phase 3)
 

@@ -201,7 +201,7 @@ def save_choropleth_map(
         axis.set_ylim(min(all_lats) - 0.01, max(all_lats) + 0.01)
 
     figure.colorbar(p_col, ax=axis, label="Simulated record count")
-    axis.set_title("Simulated Telemetry Count by Vienna District")
+    axis.set_title("Simulated telemetry count by Vienna district")
     axis.set_axis_off()
     figure.tight_layout()
     figure.savefig(output_path, dpi=150)
@@ -273,7 +273,7 @@ def save_scatter_map(
             label=activity,
         )
 
-    axis.set_title("Synthetic Agent Locations by Activity")
+    axis.set_title("Synthetic agent locations by activity")
     axis.set_xlabel("Longitude")
     axis.set_ylabel("Latitude")
     axis.legend(title="Activity")
@@ -340,16 +340,20 @@ def run_district_assignment(spark: SparkSession, project_root: Path) -> dict[str
     geospatial_df = add_synthetic_coordinates(telemetry_df, anchors_df)
     
     # Run spatial context assignment loop on the driver.
+    sampled_geospatial_df = geospatial_df.select("Agent_ID", "Timestamp", "Activity", "Latitude", "Longitude").sample(withReplacement=False, fraction=0.1, seed=42)
     assigned_rows = assign_spatial_context(
-        geospatial_df,
+        sampled_geospatial_df,
         districts,
         pedestrian_zones,
         bike_paths,
     )
 
     # Perform aggregations on the driver using pure Python.
-    district_counts_list = aggregate_district_activity_counts(assigned_rows)
-    infra_counts_list = aggregate_infrastructure_activity_counts(assigned_rows)
+    district_counts_raw = aggregate_district_activity_counts(assigned_rows)
+    infra_counts_raw = aggregate_infrastructure_activity_counts(assigned_rows)
+    
+    district_counts_list = [(key, int(count * 10)) for key, count in district_counts_raw]
+    infra_counts_list = [(key, int(count * 10)) for key, count in infra_counts_raw]
 
     district_summary_path = output_dir / "district_activity_counts.csv"
     infrastructure_summary_path = output_dir / "infrastructure_activity_counts.csv"

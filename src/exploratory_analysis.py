@@ -62,18 +62,19 @@ def plot_linear_series(spark, phone_df, plots_dir):
             axes[i].plot(t, x_vals, label='X axis', color=color_x, alpha=0.85, linewidth=1.2)
             axes[i].plot(t, y_vals, label='Y axis', color=color_y, alpha=0.85, linewidth=1.2)
             axes[i].plot(t, z_vals, label='Z axis', color=color_z, alpha=0.85, linewidth=1.2)
-            axes[i].set_title(f"activity trace: {act} (user a)", fontsize=11, loc='left')
-            axes[i].set_ylabel("acceleration (m/s²)", fontsize=9)
+            axes[i].set_title(f"Activity trace: {act} (User 'a')", fontsize=11, loc='left')
+            axes[i].set_ylabel("Acceleration (m/s²)", fontsize=9)
             if i == 0:
                 axes[i].legend(loc='upper right', frameon=True)
         else:
             axes[i].text(0.5, 0.5, f"No matching data slice found for: {act}", ha='center', va='center')
             
-    axes[-1].set_xlabel("relative sample sequence index", fontsize=10)
+    axes[-1].set_xlabel("Relative sample sequence index", fontsize=10)
     plt.tight_layout()
     plt.savefig(plots_dir / "linear_series.png", dpi=150)
     plt.close()
     logging.info("Linear series plot exported successfully.")
+
 
 def plot_variance_comparison(spark, phone_df, watch_df, plots_dir):
     # Check if the plots exist in the target directory.
@@ -115,13 +116,14 @@ def plot_variance_comparison(spark, phone_df, watch_df, plots_dir):
         hue='device', 
         palette=['#5c768d', '#9aaab7']
     )
-    plt.title("acceleration dispersion metrics: phone vs. watch devices", fontsize=11, loc='left')
-    plt.ylabel("total variance log scale (sum of x, y, z variants)")
+    plt.title("Acceleration dispersion metrics: phone vs. watch devices", fontsize=11, loc='left')
+    plt.ylabel("Total variance log scale (sum of X, Y, Z variants)")
     plt.yscale('log')
     plt.tight_layout()
     plt.savefig(plots_dir / "phone_vs_watch_comparison.png", dpi=150)
     plt.close()
     logging.info("Variance comparison plot exported successfully.")
+
 
 def plot_gravity_magnitude(spark, phone_df, plots_dir):
     # Check if the plots exist in the target directory.
@@ -147,16 +149,17 @@ def plot_gravity_magnitude(spark, phone_df, plots_dir):
             mags = [r['magnitude'] for r in rows]
             plt.plot(mags, label=f"{act} magnitude vector", color=activity_colors[act], alpha=0.85, linewidth=1.2)
             
-    plt.axhline(y=9.80665, color='firebrick', linestyle='--', alpha=0.7, label='standard earth gravity constant (~9.81 m/s²)')
-    plt.title("resultant acceleration magnitude trace", fontsize=11, loc='left')
-    plt.ylabel("magnitude $|a| = \\sqrt{x^2 + y^2 + z^2}$ (m/s²)")
-    plt.xlabel("relative sample sequence index")
+    plt.axhline(y=9.80665, color='firebrick', linestyle='--', alpha=0.7, label='Standard earth gravity constant (~9.81 m/s²)')
+    plt.title("Resultant acceleration magnitude trace", fontsize=11, loc='left')
+    plt.ylabel("Magnitude $|a| = \\sqrt{x^2 + y^2 + z^2}$ (m/s²)")
+    plt.xlabel("Relative sample sequence index")
     plt.legend(loc='upper right', frameon=True)
     
     plt.tight_layout()
     plt.savefig(plots_dir / "gravity_magnitude.png", dpi=150)
     plt.close()
     logging.info("Gravity magnitude plot exported successfully.")
+
 
 def plot_population_heterogeneity(spark, phone_df, plots_dir):
     # Check if the plots exist in the target directory.
@@ -199,12 +202,12 @@ def plot_population_heterogeneity(spark, phone_df, plots_dir):
             density_norm='width'
         )
         
-        axes[i].set_title(f"kinetic signature profile density: {act}", fontsize=11, loc='left')
-        axes[i].set_ylabel("magnitude (m/s²)", fontsize=9)
+        axes[i].set_title(f"Kinetic signature profile density: {act}", fontsize=11, loc='left')
+        axes[i].set_ylabel("Magnitude (m/s²)", fontsize=9)
         axes[i].set_xlabel("")
         axes[i].grid(True, linestyle='--', alpha=0.4)
         
-    axes[-1].set_xlabel("anonymous citizen identifier (original study participants)", fontsize=10)
+    axes[-1].set_xlabel("Anonymous citizen identifier (original study participants)", fontsize=10)
     plt.tight_layout()
     plt.savefig(plots_dir / "population_heterogeneity_violins.png", dpi=150)
     plt.close()
