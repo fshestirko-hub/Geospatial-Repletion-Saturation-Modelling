@@ -58,7 +58,7 @@ def setup_winutils(workspace_dir: Path):
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
     logging.info(f"Hadoop environment path configuration active: HADOOP_HOME={hadoop_home}")
 
-def run_bootstrapping(num_agents=50, samples_per_agent=1000):
+def run_bootstrapping(num_agents=150, samples_per_agent=10000):
     # configure paths and directories
     # Setup filesystem reference targets for source data files and outputs
     project_root = get_project_root()
@@ -206,7 +206,7 @@ def run_bootstrapping(num_agents=50, samples_per_agent=1000):
         np.random.seed(42)
         
         for agent_id in range(num_agents):
-            act = activities_distribution[agent_id]
+            act = activities_distribution[agent_id % len(activities_distribution)]
             base_user = np.random.choice(valid_users)
             key = (base_user, act)
             
