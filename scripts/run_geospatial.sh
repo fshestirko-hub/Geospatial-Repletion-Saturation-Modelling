@@ -10,11 +10,11 @@ export MPLCONFIGDIR="$ROOT/.matplotlib_cache"
 
 source "$ROOT/.venv/bin/activate"
 
-python -m src.create_minimal_telemetry
+python -m src._create_minimal_telemetry
 python - <<'PY'
 from pathlib import Path
 from pyspark.sql import SparkSession
-from src.geospatial_districts import run_district_assignment
+from src.step_13_geospatial_districts import run_district_assignment
 
 spark = (
     SparkSession.builder
@@ -31,4 +31,4 @@ finally:
     spark.stop()
 PY
 
-echo "Done. Open notebooks/3_district_assignment.ipynb or check data/geospatial_output/"
+echo "Done. Open notebooks/03_district_assignment_routed.ipynb or check data/geospatial_output/"
