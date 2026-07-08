@@ -13,8 +13,8 @@ from pyspark.sql.functions import col, expr
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def check_plots_exist(plot_filenames, plots_dir) -> bool:
-    # checks wether there are plots and warns if plots folder is missing
-    # Verify the plots directory and individual file availability, emitting warnings when directories must be created
+    # Checks whether the plots directory exists, warns and creates it recursively if missing.
+    # Verify the plots directory and individual file availability, emitting warnings when directories must be created.
     if not plots_dir.exists():
         logging.warning(f"Plots directory '{plots_dir}' is missing. Creating directory.")
         plots_dir.mkdir(parents=True, exist_ok=True)
@@ -29,16 +29,16 @@ def check_plots_exist(plot_filenames, plots_dir) -> bool:
     return True
 
 def plot_agent_kinematics(spark, synth_df, plots_dir):
-    # check if plots exist in the directory
-    # Evaluate plot presence on filesystem to prevent redundant CPU cycles and Spark executions
+    # Check if the plots exist in the target directory.
+    # Evaluate the plot presence on the filesystem to prevent redundant CPU cycles and Spark executions.
     plot_filenames = ["diagnostic_agent_kinematics.png"]
     plot_path = plots_dir / "diagnostic_agent_kinematics.png"
     
     if not check_plots_exist(plot_filenames, plots_dir):
         logging.info("Extracting telemetry slice for synthetic agent 0 (walking verification)...")
         
-        # Isolate agent 0 and compute dynamic magnitude vector
-        # Filter telemetry for walking segments of synthetic agent ID 0 and evaluate acceleration magnitudes
+        # Isolate agent 0 and compute the dynamic magnitude vector.
+        # Filter the telemetry for walking segments of synthetic agent ID 0 and evaluate acceleration magnitudes.
         agent_sample_df = synth_df.filter((col("Agent_ID") == 0) & (col("Activity") == "walk")) \
                                   .orderBy("Timestamp") \
                                   .limit(400) \
@@ -46,8 +46,8 @@ def plot_agent_kinematics(spark, synth_df, plots_dir):
                                   
         pdf_agent = agent_sample_df.toPandas()
         
-        # Render component forces and magnitude traces
-        # Plot axial component forces and resultant magnitudes relative to standard gravity
+        # Render component forces and magnitude traces.
+        # Plot the axial component forces and resultant magnitudes relative to the standard gravity baseline.
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
         t = np.arange(len(pdf_agent))
         
@@ -70,44 +70,44 @@ def plot_agent_kinematics(spark, synth_df, plots_dir):
         plt.close()
         logging.info("Kinematic trace diagnostic plot exported.")
         
-    # Display inline in IPython/Jupyter notebook environments
+    # Display inline in IPython/Jupyter notebook environments.
     try:
         from IPython.display import display, Image
         display(Image(filename=str(plot_path)))
-    except Exception:
+    except (ImportError, KeyError, AttributeError):
         pass
 
 def plot_population_density_comparison(spark, phone_df, synth_df, plots_dir):
-    # check if plots exist in the directory
-    # Evaluate plot presence on filesystem to prevent redundant CPU cycles and Spark executions
+    # Check if the plots exist in the target directory.
+    # Evaluate the plot presence on the filesystem to prevent redundant CPU cycles and Spark executions.
     plot_filenames = ["diagnostic_population_violins.png"]
     plot_path = plots_dir / "diagnostic_population_violins.png"
     
     if not check_plots_exist(plot_filenames, plots_dir):
         logging.info("Preparing real vs synthetic population density comparison matrices...")
         
-        # 1. Isolate and down-sample original empirical data (from phone_df)
-        # Extract empirical walk and bike magnitudes and down-sample to preserve shape
+        # 1. Isolate and down-sample the original empirical data (from phone_df).
+        # Extract the empirical walk and bike magnitudes and down-sample to preserve shape.
         real_pop = phone_df.filter(col("gt").isin(["walk", "bike"])) \
                            .withColumn("magnitude", expr("sqrt(x*x + y*y + z*z)")) \
                            .select("gt", "magnitude") \
                            .withColumn("source", expr("'empirical (original 9 users)'")) \
                            .sample(False, 0.002, seed=42).toPandas()
                            
-        # 2. Isolate and down-sample your new synthetic generated population
-        # Extract synthetic walk and bike magnitudes and down-sample for plotting
+        # 2. Isolate and down-sample the new synthetic generated population.
+        # Extract the synthetic walk and bike magnitudes and down-sample for plotting.
         synth_pop = synth_df.filter(col("Activity").isin(["walk", "bike"])) \
                             .withColumn("magnitude", expr("sqrt(ax*ax + ay*ay + az*az)")) \
                             .select(col("Activity").alias("gt"), "magnitude") \
                             .withColumn("source", expr("'synthetic (simulated agents)'")) \
                             .sample(False, 0.05, seed=42).toPandas()
                             
-        # Combine local records into a single verification structure
-        # Concatenate empirical and synthetic dataframes for seaborn violin representation
+        # Combine the local records into a single verification structure.
+        # Concatenate empirical and synthetic DataFrames for the Seaborn violin representation.
         diagnostic_pop_df = pd.concat([real_pop, synth_pop], axis=0)
         
-        # Render side-by-side comparison matrix
-        # Plot split violins displaying comparative distribution parameters
+        # Render the side-by-side comparison matrix.
+        # Plot split violins displaying comparative distribution parameters.
         plt.figure(figsize=(10, 5.5))
         sns.violinplot(
             data=diagnostic_pop_df,
@@ -131,29 +131,29 @@ def plot_population_density_comparison(spark, phone_df, synth_df, plots_dir):
         plt.close()
         logging.info("Population density validation matrix exported.")
         
-    # Display inline in IPython/Jupyter notebook environments
+    # Display inline in IPython/Jupyter notebook environments.
     try:
         from IPython.display import display, Image
         display(Image(filename=str(plot_path)))
-    except Exception:
+    except (ImportError, KeyError, AttributeError):
         pass
 
 def plot_temporal_autocorrelation(spark, phone_df, synth_df, plots_dir):
-    # check if plots exist in the directory
-    # Evaluate plot presence on filesystem to prevent redundant CPU cycles and Spark executions
+    # Check if the plots exist in the target directory.
+    # Evaluate the plot presence on the filesystem to prevent redundant CPU cycles and Spark executions.
     plot_filenames = ["diagnostic_temporal_acf.png"]
     plot_path = plots_dir / "diagnostic_temporal_acf.png"
     
     if not check_plots_exist(plot_filenames, plots_dir):
         logging.info("Running temporal autocorrelation (ACF) congruence calculations...")
         
-        # Extract a contiguous clean walking signal from a real user and a synthetic agent
-        # Retrieve contiguous walking sequences from original and synthetic records
+        # Extract a contiguous clean walking signal from a real user and a synthetic agent.
+        # Retrieve the contiguous walking sequences from the original and synthetic records.
         real_signal = phone_df.filter((col("User") == 'a') & (col("gt") == 'walk')).orderBy("Creation_Time").limit(500).select(expr("sqrt(x*x + y*y + z*z)").alias("m")).toPandas()['m'].values
         synth_signal = synth_df.filter((col("Agent_ID") == 0) & (col("Activity") == 'walk')).orderBy("Timestamp").limit(500).select(expr("sqrt(ax*ax + ay*ay + az*az)").alias("m")).toPandas()['m'].values
         
-        # Calculate Autocorrelation Function (ACF) lines manually using numpy
-        # Define local ACF helper function to evaluate coefficients across time lags
+        # Calculate Autocorrelation Function (ACF) lines manually using NumPy.
+        # Define a local ACF helper function to evaluate coefficients across time lags.
         def compute_acf(signal, max_lag=120):
             mean_val = np.mean(signal)
             var_val = np.var(signal)
@@ -171,8 +171,8 @@ def plot_temporal_autocorrelation(spark, phone_df, synth_df, plots_dir):
         real_acf = compute_acf(real_signal, max_lags)
         synth_acf = compute_acf(synth_signal, max_lags)
         
-        # Render comparison
-        # Plot empirical and synthetic autocorrelation coefficients side by side
+        # Render the comparison.
+        # Plot the empirical and synthetic autocorrelation coefficients side by side.
         plt.figure(figsize=(10, 4.5))
         lags = np.arange(max_lags)
         plt.plot(lags, real_acf, label='empirical stride signature (user a)', color='#5c768d', linewidth=1.5)
@@ -190,9 +190,9 @@ def plot_temporal_autocorrelation(spark, phone_df, synth_df, plots_dir):
         plt.close()
         logging.info("Autocorrelation diagnostics complete. Shutting down diagnostic environment.")
         
-    # Display inline in IPython/Jupyter notebook environments
+    # Display inline in IPython/Jupyter notebook environments.
     try:
         from IPython.display import display, Image
         display(Image(filename=str(plot_path)))
-    except Exception:
+    except (ImportError, KeyError, AttributeError):
         pass

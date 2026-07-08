@@ -22,7 +22,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-# fallback anchor in central Vienna if no per-agent anchors are provided
+# Fallback anchor in central Vienna if no per-agent anchors are provided.
 VIENNA_LAT = 48.20849
 VIENNA_LON = 16.37208
 METRES_PER_DEGREE_LAT = 111_320.0
@@ -47,14 +47,14 @@ def add_synthetic_coordinates(
     if anchors_df is not None:
         positioned_df = telemetry_df.join(anchors_df, on=["Agent_ID", "Activity"], how="left")
 
-        # Check if the anchor dataframe contains pre-calculated route arrays
+        # Check if the anchor DataFrame contains pre-calculated route arrays.
         if "route_lats" in positioned_df.columns:
             from pyspark.sql.functions import element_at, size, least, greatest, floor
 
-            # Convert elapsed seconds to 1-based index (since Spark arrays are 1-indexed)
+            # Convert elapsed seconds to 1-based index (since Spark arrays are 1-indexed).
             idx = floor(elapsed_seconds).cast("int") + 1
 
-            # Clamp index between 1 and the size of the route array
+            # Clamp index between 1 and the size of the route array.
             clamped_idx = greatest(lit(1), least(idx, size(col("route_lats"))))
 
             return (
@@ -65,7 +65,7 @@ def add_synthetic_coordinates(
             )
 
         else:
-            # Fallback to straight-line if route path is missing in anchors
+            # Fallback to straight-line if route path is missing in anchors.
             heading_radians = col("heading_radians")
             start_lat = col("start_lat")
             start_lon = col("start_lon")
@@ -173,7 +173,7 @@ def run_geospatial_streaming_simulation(spark: SparkSession, project_root: Path)
     master_df = spark.read.parquet(str(master_parquet_path))
     master_df.repartition(10).write.mode("overwrite").parquet(str(streaming_source_dir))
 
-    # Build anchors to enable street-network routing in the stream
+    # Build anchors to enable street-network routing in the stream.
     from src.vienna_spatial_layers import (
         build_agent_anchors_spark,
         download_vienna_layers,

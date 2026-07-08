@@ -12,17 +12,18 @@ from pyspark.sql.types import StructType, StructField, LongType, DoubleType, Str
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_project_root() -> Path:
-    # locate project root relative to execution context
-    # Determine the directory path to project root recursively from current working directory
+    # Locate project root relative to the execution context.
+    # Determine the directory path to the project root recursively from the current working directory.
     current = Path.cwd()
     for parent in [current] + list(current.parents):
         if (parent / "data").exists():
             return parent
     return current
 
+
 def setup_winutils(workspace_dir: Path):
-    # configure Windows native binary environment variables
-    # Initialize WinUtils and hadoop dll binaries dynamically on Windows hosts to skip filesystem driver warnings
+    # Configure Windows native binary environment variables.
+    # Initialise WinUtils and hadoop.dll binaries dynamically on Windows hosts to skip filesystem driver warnings.
     if os.name != 'nt':
         logging.info("Non-Windows OS detected. Skipping native WinUtils configuration.")
         return
@@ -58,9 +59,10 @@ def setup_winutils(workspace_dir: Path):
     os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
     logging.info(f"Hadoop environment path configuration active: HADOOP_HOME={hadoop_home}")
 
+
 def run_bootstrapping(num_agents=150, samples_per_agent=10000):
-    # configure paths and directories
-    # Setup filesystem reference targets for source data files and outputs
+    # Configure paths and directories.
+    # Setup filesystem reference targets for source data files and outputs.
     project_root = get_project_root()
     setup_winutils(project_root)
     
@@ -73,32 +75,35 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
     parquet_out_path = processed_dir / "synthetic_telemetry.parquet"
     temp_json_path = processed_dir / "temp_synthetic.json"
     
-    # Terminate active SparkSession to apply new JVM configurations
+    # Check if an active Spark session already exists or is configured in the environment.
+    active_session = SparkSession.getActiveSession()
+    session_created = False
+    
+    if active_session is not None:
+        spark = active_session
+        logging.info("Reusing active Spark Session for Bootstrapping.")
+    else:
+        logging.info("Spawning adaptive distributed Spark Session environment...")
+        spark_builder = SparkSession.builder \
+            .appName("HHAR-Bootstrapping-Engine") \
+            .config("spark.sql.shuffle.partitions", "4") # Keep shuffle partitions minimal to prevent parallel scheduling overhead.
+            
+        if os.name == 'nt':
+            spark_builder = spark_builder.config("spark.driver.host", "127.0.0.1")
+            
+        # Check if master is specified by environment variables or system properties.
+        # If not, fall back to "local[*]" and allocate 4g memory for local development stability.
+        master_url = os.environ.get("SPARK_MASTER")
+        if not master_url and not any(env.startswith("SPARK_") for env in os.environ):
+            spark_builder = spark_builder.master("local[*]") \
+                                         .config("spark.driver.memory", "4g") \
+                                         .config("spark.driver.maxResultSize", "2g")
+            
+        spark = spark_builder.getOrCreate()
+        session_created = True
+        
     try:
-        active_session = SparkSession.getActiveSession()
-        if active_session is not None:
-            logging.info("Stopping active Spark Session to apply new configurations...")
-            active_session.stop()
-    except Exception as e:
-        logging.warning(f"Error stopping active session: {e}")
-        
-    # build adaptive Spark session
-    # Retrieve active session or instantiate new one with local configuration
-    logging.info("Spawning adaptive distributed Spark Session environment...")
-    spark_builder = SparkSession.builder \
-        .appName("HHAR-Bootstrapping-Engine") \
-        .master("local[*]") \
-        .config("spark.driver.memory", "4g") \
-        .config("spark.driver.maxResultSize", "2g") \
-        .config("spark.sql.shuffle.partitions", "100")
-        
-    if os.name == 'nt':
-        spark_builder = spark_builder.config("spark.driver.host", "127.0.0.1")
-        
-    spark = spark_builder.getOrCreate()
-        
-    try:
-        # Define explicit CSV schema to avoid scanning the massive 1.3 GB CSV files twice
+        # Define an explicit CSV schema to avoid scanning the massive 1.3 GB CSV files twice.
         csv_schema = StructType([
             StructField("Index", LongType(), True),
             StructField("Arrival_Time", LongType(), True),
@@ -112,15 +117,15 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
             StructField("gt", StringType(), True)
         ])
 
-        # load raw sensor csv feeds
-        # Read source accelerometer and gyroscope feeds concurrently
+        # Load raw sensor CSV feeds.
+        # Read source accelerometer and gyroscope feeds concurrently.
         logging.info("Ingesting raw multi-variable sensor feeds from storage layer...")
         df_acc_raw = spark.read.schema(csv_schema).csv(str(acc_path), header=True)
         df_gyro_raw = spark.read.schema(csv_schema).csv(str(gyro_path), header=True)
         
-        # strip whitespace from column schemas and keep only needed columns
-        # Clean target schema field headers recursively to avoid downstream resolution exceptions
-        logging.info("Executing parallelized metadata schema sanitization transformations...")
+        # Strip whitespace from column schemas and keep only needed columns.
+        # Clean target schema field headers recursively to avoid downstream resolution exceptions.
+        logging.info("Executing parallelised metadata schema sanitisation transformations...")
         needed_cols = ["Creation_Time", "x", "y", "z", "User", "Model", "Device", "gt"]
         df_acc_clean = df_acc_raw.select(*[col(c).alias(c.strip()) for c in df_acc_raw.columns]).select(needed_cols)
         df_gyro_clean = df_gyro_raw.select(*[col(c).alias(c.strip()) for c in df_gyro_raw.columns]).select(needed_cols)
@@ -131,8 +136,8 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
         df_acc_filtered = df_acc_clean.filter((col("User").isin(valid_users)) & (col("gt").isin(valid_activities)))
         df_gyro_filtered = df_gyro_clean.filter((col("User").isin(valid_users)) & (col("gt").isin(valid_activities)))
         
-        # establish uniform 10ms temporal bins
-        # Down-sample high-frequency readings by cast rounding creation epoch time
+        # Establish uniform 10ms temporal bins.
+        # Down-sample high-frequency readings by cast rounding creation epoch time.
         logging.info("Assembling uniform 10ms temporal state bins across cluster...")
         df_acc_bin = df_acc_filtered.withColumn("time_bin", (col("Creation_Time") / 10000000).cast("long")) \
                                     .groupBy("User", "Model", "Device", "gt", "time_bin") \
@@ -142,22 +147,22 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
                                       .groupBy("User", "Model", "Device", "gt", "time_bin") \
                                       .agg(mean("x").alias("gx"), mean("y").alias("gy"), mean("z").alias("gz"))
                                       
-        # join acceleration and gyroscope telemetry
-        # Join parallel data streams on subject, infrastructure activity, and temporal bins
-        logging.info("Executing 6D vector synchronization join (Accelerometer + Gyroscope streams)...")
+        # Join acceleration and gyroscope telemetry.
+        # Join parallel data streams on subject, infrastructure activity, and temporal bins.
+        logging.info("Executing 6D vector synchronisation join (Accelerometer + Gyroscope streams)...")
         aligned_df = df_acc_bin.join(df_gyro_bin, ["User", "Model", "Device", "gt", "time_bin"], "inner") \
                                .withColumn("mag", expr("sqrt(ax*ax + ay*ay + az*az)"))
         
-        # apply quality constraint window slice
-        # Filter telemetry segments to first 5000 uniform rows per group
+        # Apply quality constraint window slice.
+        # Filter telemetry segments to first 5000 uniform rows per group.
         window_slice = Window.partitionBy("User", "gt").orderBy("time_bin")
         sliced_df = aligned_df.withColumn("rn", expr("row_number()").over(window_slice)) \
                               .filter(col("rn") <= 5000) \
                               .drop("rn") \
                               .cache()
                               
-        # frequency decomposition via moving average trend window
-        # Isolate slow gravitational trends from high-frequency transit variance
+        # Frequency decomposition via moving average trend window.
+        # Isolate slow gravitational trends from high-frequency transit variance.
         logging.info("Extracting low-frequency gravitational trends from dynamic variants...")
         trend_window = Window.partitionBy("User", "gt").orderBy("time_bin").rowsBetween(-15, 15)
         
@@ -167,8 +172,8 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
             .withColumn("r_ax", col("ax") - col("t_ax")).withColumn("r_ay", col("ay") - col("t_ay")).withColumn("r_az", col("az") - col("t_az")) \
             .withColumn("r_gx", col("gx") - col("t_gx")).withColumn("r_gy", col("gy") - col("t_gy")).withColumn("r_gz", col("gz") - col("t_gz"))
             
-        # cache segments to driver memory
-        # Collect dataframes locally into driver memory arrays for block bootstrapping
+        # Cache segments to driver memory.
+        # Collect dataframes locally into driver memory arrays for block bootstrapping.
         logging.info("Caching structured bootstrap data segments down into host driver memory...")
         std_devs_df = sliced_df.groupBy("User", "gt").agg(stddev("mag").alias("std_mag"))
         
@@ -194,8 +199,8 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
             for k in pool[key].keys():
                 pool[key][k] = np.array(pool[key][k])
                 
-        # block bootstrap execution loop
-        # Deploy non-parametric kinematic bootstrap engines with overlapping boundary phase matching
+        # Block bootstrap execution loop.
+        # Deploy non-parametric kinematic bootstrap engines with overlapping boundary phase matching.
         logging.info(f"Deploying kinematic bootstrap engines across {num_agents} target synthetic agents...")
         synthetic_records = []
         activities_distribution = ['walk'] * 20 + ['bike'] * 15 + ['stand'] * 15
@@ -228,8 +233,8 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
                 if block_idx == 0:
                     start = np.random.randint(0, max_start_pos)
                 else:
-                    # element-wise sum of tail trend and residual components
-                    # Add trailing overlap samples to evaluate phase transition boundaries
+                    # Element-wise sum of tail trend and residual components.
+                    # Add trailing overlap samples to evaluate phase transition boundaries.
                     tail_ax = np.array(agent_r['ax'][-p:]) + np.array(agent_t['ax'][-p:])
                     
                     best_start, min_distance = 0, float('inf')
@@ -261,15 +266,15 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
                     "Activity": str(act)
                 })
                 
-        # write records to JSON staging area
-        # Stream synthetic dict records into temporary staging area on disk
+        # Write records to JSON staging area.
+        # Stream synthetic dict records into temporary staging area on disk.
         logging.info(f"Streaming generated structures into staging file workspace: {temp_json_path}...")
         with open(temp_json_path, "w") as f:
             for record in synthetic_records:
                 f.write(json.dumps(record) + "\n")
                 
-        # ingest JSON to spark and export parquet columnar database
-        # Load JSON records into Spark cluster and compress into target Parquet format
+        # Ingest JSON to Spark and export Parquet columnar database.
+        # Load JSON records into Spark cluster and compress into target Parquet format.
         logging.info("Marshalling JSON structures natively into Spark engine representation...")
         synth_df = spark.read.json(str(temp_json_path))
         
@@ -289,8 +294,12 @@ def run_bootstrapping(num_agents=150, samples_per_agent=10000):
             os.remove(temp_json_path)
         raise e
     finally:
-        logging.info("Terminating background distributed processing engines...")
-        # spark.stop()  # Keep session alive!
+        if session_created:
+            logging.info("Terminating background distributed processing engines...")
+            spark.stop()
+        else:
+            logging.info("Keeping active Spark Session alive for downstream tasks.")
+
 
 if __name__ == "__main__":
     run_bootstrapping()

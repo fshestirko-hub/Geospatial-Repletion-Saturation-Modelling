@@ -28,18 +28,18 @@ def assign_spatial_context(
     rows = telemetry_df.collect()
 
     logging.info("Building spatial search indices on the driver...")
-    # 1. District Index
+    # 1. District Index.
     dist_geoms = [d["geometry"] for d in districts]
     dist_tree = STRtree(dist_geoms)
     dist_names = [d["district_name"] for d in districts]
     dist_numbers = [d["district_number"] for d in districts]
 
-    # 2. Pedestrian Index
+    # 2. Pedestrian Index.
     ped_geoms = [p["geometry"] for p in pedestrian_zones]
     ped_tree = STRtree(ped_geoms) if ped_geoms else None
     ped_labels = [p["infrastructure_label"] for p in pedestrian_zones]
 
-    # 3. Bike Index
+    # 3. Bike Index.
     bike_geoms = [b["geometry"] for b in bike_paths]
     bike_tree = STRtree(bike_geoms) if bike_geoms else None
     bike_labels = [b["infrastructure_label"] for b in bike_paths]
@@ -52,7 +52,7 @@ def assign_spatial_context(
         activity = r.Activity
         point = Point(x, y)
 
-        # 1. District Lookup
+        # 1. District Lookup.
         d_name, d_num = "Outside Vienna", "outside"
         if dist_tree is not None:
             cand_indices = dist_tree.query(point)
@@ -61,7 +61,7 @@ def assign_spatial_context(
                     d_name, d_num = dist_names[int(idx)], dist_numbers[int(idx)]
                     break
 
-        # 2. Infrastructure Lookup
+        # 2. Infrastructure Lookup.
         infra_type, infra_label = "district_centroid", d_name
 
         if activity == "walk":
@@ -149,7 +149,7 @@ def save_choropleth_map(
     district_counts_list: list,
     output_path: Path,
 ) -> Path:
-    """Plot Vienna districts as a choropleth map using pure matplotlib patches (0% geopandas)."""
+    """Plot Vienna districts as a choropleth map using pure Matplotlib patches (0% GeoPandas)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -188,7 +188,7 @@ def save_choropleth_map(
     p_col.set_array(np.array(values))
     axis.add_collection(p_col)
 
-    # Automatically set plot bounds
+    # Automatically set plot bounds.
     all_lons = []
     all_lats = []
     for d in districts:
@@ -216,7 +216,7 @@ def save_scatter_map(
     output_path: Path,
     max_points: int = 5000,
 ) -> Path:
-    """Plot synthetic agent locations over district boundary lines using pure matplotlib (0% geopandas)."""
+    """Plot synthetic agent locations over district boundary lines using pure Matplotlib (0% GeoPandas)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -239,7 +239,7 @@ def save_scatter_map(
 
     figure, axis = plt.subplots(figsize=(10, 8))
     
-    # Plot district boundaries
+    # Plot district boundaries.
     for d in districts:
         geom = d["geometry"]
         if geom.geom_type == "Polygon":
@@ -252,7 +252,7 @@ def save_scatter_map(
             coords = np.array(poly.exterior.coords)
             axis.plot(coords[:, 0], coords[:, 1], color="#444444", linewidth=0.6)
 
-    # Group coordinates by activity
+    # Group coordinates by activity.
     by_activity = {act: ([], []) for act in activity_colors}
     for r in points_sample:
         activity = r["Activity"]
@@ -339,7 +339,7 @@ def run_district_assignment(spark: SparkSession, project_root: Path) -> dict[str
 
     geospatial_df = add_synthetic_coordinates(telemetry_df, anchors_df)
     
-    # Run spatial context assignment loop on the driver
+    # Run spatial context assignment loop on the driver.
     assigned_rows = assign_spatial_context(
         geospatial_df,
         districts,
@@ -347,14 +347,14 @@ def run_district_assignment(spark: SparkSession, project_root: Path) -> dict[str
         bike_paths,
     )
 
-    # Perform aggregations on the driver using pure Python
+    # Perform aggregations on the driver using pure Python.
     district_counts_list = aggregate_district_activity_counts(assigned_rows)
     infra_counts_list = aggregate_infrastructure_activity_counts(assigned_rows)
 
     district_summary_path = output_dir / "district_activity_counts.csv"
     infrastructure_summary_path = output_dir / "infrastructure_activity_counts.csv"
 
-    # Write CSV summaries directly using standard Python csv (0% Pandas)
+    # Write CSV summaries directly using standard Python CSV (0% Pandas).
     import csv
     logging.info("Writing district summary CSV...")
     with open(district_summary_path, "w", newline="", encoding="utf-8") as f:

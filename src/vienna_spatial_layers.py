@@ -216,7 +216,7 @@ def build_agent_anchor_list(
     bike_geometries = [b["geometry"] for b in bike_paths]
     bike_labels = [b["infrastructure_label"] for b in bike_paths]
 
-    # Load routing graph
+    # Load routing graph.
     project_root = Path(__file__).resolve().parent.parent
     G = load_vienna_streets_graph(project_root)
     graph_nodes = list(G.nodes) if G is not None else []
@@ -227,7 +227,7 @@ def build_agent_anchor_list(
         activity = str(agent["Activity"])
         heading_radians = (agent_id % 16) * (2.0 * math.pi / 16.0)
 
-        # 1. Establish start point
+        # 1. Establish start point.
         if activity == "walk":
             feature_index = agent_id % len(pedestrian_geometries)
             start_point = pedestrian_geometries[feature_index].representative_point()
@@ -245,34 +245,35 @@ def build_agent_anchor_list(
             infrastructure_type = "district_centroid"
             infrastructure_label = district_labels[feature_index]
 
-        # 2. Establish route path and destination
+        # 2. Establish route path and destination.
         route_lats = []
         route_lons = []
         dest_lat, dest_lon = float(start_point.y), float(start_point.x)
 
         if activity in ("walk", "bike") and G is not None:
             try:
-                # Snap start point to nearest graph node
+                # Snap start point to nearest graph node.
                 start_node = ox.distance.nearest_nodes(G, float(start_point.x), float(start_point.y))
 
-                # Route destination based on attraction ratio
-                random.seed(agent_id + 200)  # Reproducible randomness per agent
+                # Route destination based on attraction ratio.
+                # Reproducible randomness per agent.
+                random.seed(agent_id + 200)
                 if random.random() < STATION_ATTRACTION_RATIO:
-                    # Target a transit station
+                    # Target a transit station.
                     station_lat, station_lon = random.choice(STATION_COORDS)
                     dest_node = ox.distance.nearest_nodes(G, station_lon, station_lat)
                     dest_lat, dest_lon = station_lat, station_lon
                 else:
-                    # Target a random node in the street graph
+                    # Target a random node in the street graph.
                     dest_node = random.choice(graph_nodes)
                     dest_lat = float(G.nodes[dest_node]["y"])
                     dest_lon = float(G.nodes[dest_node]["x"])
 
-                # Calculate shortest path along the graph
+                # Calculate shortest path along the graph.
                 path = nx.shortest_path(G, source=start_node, target=dest_node, weight="length")
                 coords = [[float(G.nodes[n]["y"]), float(G.nodes[n]["x"])] for n in path]
                 
-                # Sample coordinates at 1-second intervals
+                # Sample coordinates at 1-second intervals.
                 if len(coords) > 1:
                     coords_meters = []
                     curr_x, curr_y = 0.0, 0.0
@@ -300,7 +301,7 @@ def build_agent_anchor_list(
                         route_lons.append(float(lon))
                         d += step_distance
                     
-                    # Add final destination coordinate
+                    # Add final destination coordinate.
                     route_lats.append(float(dest_lat))
                     route_lons.append(float(dest_lon))
                 else:
@@ -377,7 +378,7 @@ def build_agent_anchors_spark(
     temp_dir = Path(tempfile.gettempdir())
     temp_file_path = temp_dir / "temp_agent_anchors.parquet"
 
-    # Define schema explicitly for PyArrow pylist conversion (0% Pandas!)
+    # Define schema explicitly for PyArrow pylist conversion (0% Pandas!).
     schema = pa.schema([
         ("Agent_ID", pa.int64()),
         ("Activity", pa.string()),

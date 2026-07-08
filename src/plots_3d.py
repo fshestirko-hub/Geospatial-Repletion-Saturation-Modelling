@@ -11,8 +11,8 @@ from pyspark.sql.functions import col
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def check_plots_exist(plot_filenames, plots_dir) -> bool:
-    # checks wether there are plots and warns if plots folder is missing
-    # Verify the plots directory and individual file availability, emitting warnings when directories must be created
+    # Checks whether the plots directory exists, warns and creates it recursively if missing.
+    # Verify the plots directory and individual file availability, emitting warnings when directories must be created.
     if not plots_dir.exists():
         logging.warning(f"Plots directory '{plots_dir}' is missing. Creating directory.")
         plots_dir.mkdir(parents=True, exist_ok=True)
@@ -27,23 +27,23 @@ def check_plots_exist(plot_filenames, plots_dir) -> bool:
     return True
 
 def plot_attractor_geometries(spark, phone_df, plots_dir):
-    # check if plots exist in the directory
-    # Evaluate plot presence on filesystem to prevent redundant CPU cycles and Spark executions
+    # Check if the plots exist in the target directory.
+    # Evaluate the plot presence on the filesystem to prevent redundant CPU cycles and Spark executions.
     plot_filenames = ["topographic_map.png"]
     if check_plots_exist(plot_filenames, plots_dir):
         return
 
     logging.info("Generating phase-space attractor distributions (2D & 3D)...")
     
-    # Isolate user a phone telemetry data
-    # Filter global DataFrame down to user 'a' acceleration records
+    # Isolate user 'a' phone telemetry data.
+    # Filter the global DataFrame down to user 'a' acceleration records.
     user_phone = phone_df.filter(col("User") == 'a')
     
     activities = ['stand', 'walk', 'bike']
     activity_colors = {'stand': '#5c768d', 'walk': '#b85a5a', 'bike': '#4c8c72'}
     
-    # Render attractor grids
-    # Initialize matplotlib canvas for multi-axis scatter visualizations
+    # Render attractor grids in 2D and 3D.
+    # Initialise the Matplotlib canvas for multi-axis scatter visualisations.
     fig = plt.figure(figsize=(14, 6))
     ax2d = fig.add_subplot(121)
     ax3d = fig.add_subplot(122, projection='3d')
@@ -76,16 +76,16 @@ def plot_attractor_geometries(spark, phone_df, plots_dir):
     logging.info("Attractor geometries plot exported successfully.")
 
 def plot_multivariate_user_attractors_3d(spark, phone_df, plots_dir):
-    # check if plots exist in the directory
-    # Perform filesystem scan for targeted PNG charts before executing data collects
+    # Check if the plots exist in the target directory.
+    # Perform a filesystem scan for targeted PNG charts before executing data collects.
     plot_filenames = ["multivariate_user_attractors_3d.png"]
     if check_plots_exist(plot_filenames, plots_dir):
         return
 
     logging.info("Generating 3D joint distribution attractor plot...")
     
-    # Select 3 distinct users to contrast walk signatures
-    # Filter sensor records for walking activities of target users a, b, and c
+    # Select three distinct users to contrast walk signatures.
+    # Filter the sensor records for walking activities of target users 'a', 'b', and 'c'.
     contrast_users = ['a', 'b', 'c']
     target_activity = 'walk'
     
@@ -105,8 +105,8 @@ def plot_multivariate_user_attractors_3d(spark, phone_df, plots_dir):
         
     pdf_attractor = joint_attractor_df.toPandas()
     
-    # Render 3D phase-space plot
-    # Initialize 3D projection axes and plot scatter distributions per user
+    # Render the 3D phase-space plot.
+    # Initialise the 3D projection axes and plot scatter distributions per user.
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     
