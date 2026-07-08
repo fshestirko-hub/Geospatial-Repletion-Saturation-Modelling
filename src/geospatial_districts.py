@@ -25,9 +25,12 @@ def assign_spatial_context(
     from shapely.strtree import STRtree
 
     logging.info("Collecting telemetry data to driver for spatial context assignment...")
+    # Driver Collection: Collect records locally. Safe since datasets are down-sampled/diagnostic.
     rows = telemetry_df.collect()
 
     logging.info("Building spatial search indices on the driver...")
+    # R-Tree Indexing: STRtree builds spatial indexing over geometries to reduce point-in-polygon query times to O(log N).
+    
     # 1. District Index.
     dist_geoms = [d["geometry"] for d in districts]
     dist_tree = STRtree(dist_geoms)
@@ -52,7 +55,7 @@ def assign_spatial_context(
         activity = r.Activity
         point = Point(x, y)
 
-        # 1. District Lookup.
+        # 1. District Lookup (Point-in-Polygon validation).
         d_name, d_num = "Outside Vienna", "outside"
         if dist_tree is not None:
             cand_indices = dist_tree.query(point)
@@ -64,6 +67,7 @@ def assign_spatial_context(
         # 2. Infrastructure Lookup.
         infra_type, infra_label = "district_centroid", d_name
 
+        # Snapping logic matching active transit states:
         if activity == "walk":
             if ped_tree is not None:
                 cand_indices = ped_tree.query(point)
@@ -80,6 +84,7 @@ def assign_spatial_context(
 
         elif activity == "bike":
             if bike_tree is not None:
+                # Query nearest bike path segment.
                 nearest_idx = bike_tree.query_nearest(point)
                 if nearest_idx is not None:
                     if hasattr(nearest_idx, "__len__") or hasattr(nearest_idx, "__iter__"):
@@ -88,6 +93,7 @@ def assign_spatial_context(
                         idx_val = int(nearest_idx)
 
                     nearest_geom = bike_geoms[idx_val]
+                    # Calculate segment distance and scale to metres.
                     distance_metres = point.distance(nearest_geom) * METRES_PER_DEGREE_LAT
                     if distance_metres <= BIKE_MATCH_TOLERANCE_METRES:
                         infra_type, infra_label = "bike_path", bike_labels[idx_val]
@@ -110,6 +116,7 @@ def assign_spatial_context(
 
 def aggregate_district_activity_counts(assigned_rows: list[dict]) -> list[tuple]:
     """Aggregate activity records by district and time window using pure Python."""
+    # Grouping via dict to avoid Spark startup query scheduling overhead.
     counts = defaultdict(int)
     for r in assigned_rows:
         ts = r["Timestamp"]
@@ -149,40 +156,42 @@ def save_choropleth_map(
     district_counts_list: list,
     output_path: Path,
 ) -> Path:
-    """Plot Vienna districts as a choropleth map using pure Matplotlib patches (0% GeoPandas)."""
+    """Plot activity record density per district boundary using pure Matplotlib (0% GeoPandas dependency)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Polygon as MplPolygon
     from matplotlib.collections import PatchCollection
+    from matplotlib.patches import Polygon as MPolygon
     import numpy as np
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Accumulate district counts.
     totals = defaultdict(int)
     for (d_name, d_num, activity, win_idx), count in district_counts_list:
-        totals[d_name] += count
+        totals[(d_name, d_num)] += count
 
     figure, axis = plt.subplots(figsize=(10, 8))
     patches = []
     values = []
 
+    # Map district geometries to polygon shapes.
     for d in districts:
         geom = d["geometry"]
-        count = totals.get(d["district_name"], 0)
-        
+        val = totals.get((d["district_name"], d["district_number"]), 0)
+
         if geom.geom_type == "Polygon":
             polys = [geom]
         elif geom.geom_type == "MultiPolygon":
             polys = list(geom.geoms)
         else:
             polys = []
-            
+
         for poly in polys:
             coords = np.array(poly.exterior.coords)
-            patches.append(MplPolygon(coords, closed=True))
-            values.append(count)
+            patches.append(MPolygon(coords, closed=True))
+            values.append(val)
 
     p_col = PatchCollection(patches, cmap="YlOrRd", edgecolors="black", linewidths=0.8)
     p_col.set_array(np.array(values))
@@ -309,11 +318,13 @@ def run_district_assignment(spark: SparkSession, project_root: Path) -> dict[str
             "Run bootstrapping or src/create_minimal_telemetry.py first."
         )
 
+    # Ingest spatial boundary layers.
     layer_paths = download_vienna_layers(spatial_dir)
     districts = load_vienna_districts(layer_paths["districts"])
     pedestrian_zones = load_vienna_pedestrian_zones(layer_paths["pedestrian_zones"])
     bike_paths = load_vienna_bike_paths(layer_paths["bike_paths"])
 
+    # Load synthetic telemetry.
     telemetry_df = spark.read.parquet(str(telemetry_path))
     full_anchors_df = build_agent_anchors_spark(
         telemetry_df,
@@ -339,7 +350,7 @@ def run_district_assignment(spark: SparkSession, project_root: Path) -> dict[str
 
     geospatial_df = add_synthetic_coordinates(telemetry_df, anchors_df)
     
-    # Run spatial context assignment loop on the driver.
+    # Run spatial context assignment loop on the driver with sampled dataset to preserve memory.
     sampled_geospatial_df = geospatial_df.select("Agent_ID", "Timestamp", "Activity", "Latitude", "Longitude").sample(withReplacement=False, fraction=0.1, seed=42)
     assigned_rows = assign_spatial_context(
         sampled_geospatial_df,
@@ -348,17 +359,18 @@ def run_district_assignment(spark: SparkSession, project_root: Path) -> dict[str
         bike_paths,
     )
 
-    # Perform aggregations on the driver using pure Python.
+    # Perform aggregations.
     district_counts_raw = aggregate_district_activity_counts(assigned_rows)
     infra_counts_raw = aggregate_infrastructure_activity_counts(assigned_rows)
     
+    # Extrapolate counts based on sampling fraction (10%).
     district_counts_list = [(key, int(count * 10)) for key, count in district_counts_raw]
     infra_counts_list = [(key, int(count * 10)) for key, count in infra_counts_raw]
 
     district_summary_path = output_dir / "district_activity_counts.csv"
     infrastructure_summary_path = output_dir / "infrastructure_activity_counts.csv"
 
-    # Write CSV summaries directly using standard Python CSV (0% Pandas).
+    # Write CSV summaries directly using standard Python CSV library.
     import csv
     logging.info("Writing district summary CSV...")
     with open(district_summary_path, "w", newline="", encoding="utf-8") as f:

@@ -14,8 +14,7 @@ from src.plots_3d import plot_multivariate_user_attractors_3d
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def check_plots_exist(plot_filenames, plots_dir) -> bool:
-    # Checks whether the plots directory exists, warns and creates it recursively if missing.
-    # Verify the plots directory and individual file availability, emitting warnings when directories must be created.
+    # Check whether the plots directory exists; create it if missing.
     if not plots_dir.exists():
         logging.warning(f"Plots directory '{plots_dir}' is missing. Creating directory.")
         plots_dir.mkdir(parents=True, exist_ok=True)
@@ -29,9 +28,9 @@ def check_plots_exist(plot_filenames, plots_dir) -> bool:
     logging.info(f"All target plots {plot_filenames} already exist in '{plots_dir}'. Skipping generation.")
     return True
 
+
 def plot_linear_series(spark, phone_df, plots_dir):
     # Check if the plots exist in the target directory.
-    # Evaluate the plot presence on the filesystem to prevent redundant CPU cycles and Spark executions.
     plot_filenames = ["linear_series.png"]
     if check_plots_exist(plot_filenames, plots_dir):
         return
@@ -39,7 +38,6 @@ def plot_linear_series(spark, phone_df, plots_dir):
     logging.info("Constructing continuous signal time series plots...")
     
     # Isolate user 'a' phone telemetry data.
-    # Filter the global DataFrame down to user 'a' acceleration records.
     user_phone = phone_df.filter(col("User") == 'a')
     
     color_x, color_y, color_z = 'firebrick', 'steelblue', 'darkslategray'
@@ -78,7 +76,6 @@ def plot_linear_series(spark, phone_df, plots_dir):
 
 def plot_variance_comparison(spark, phone_df, watch_df, plots_dir):
     # Check if the plots exist in the target directory.
-    # Evaluate the plot presence on the filesystem to prevent redundant CPU cycles and Spark executions.
     plot_filenames = ["phone_vs_watch_comparison.png"]
     if check_plots_exist(plot_filenames, plots_dir):
         return
@@ -127,7 +124,6 @@ def plot_variance_comparison(spark, phone_df, watch_df, plots_dir):
 
 def plot_gravity_magnitude(spark, phone_df, plots_dir):
     # Check if the plots exist in the target directory.
-    # Evaluate the plot presence on the filesystem to prevent redundant CPU cycles and Spark executions.
     plot_filenames = ["gravity_magnitude.png"]
     if check_plots_exist(plot_filenames, plots_dir):
         return
@@ -163,7 +159,6 @@ def plot_gravity_magnitude(spark, phone_df, plots_dir):
 
 def plot_population_heterogeneity(spark, phone_df, plots_dir):
     # Check if the plots exist in the target directory.
-    # Evaluate the plot presence on the filesystem to prevent redundant CPU cycles and Spark executions.
     plot_filenames = ["population_heterogeneity_violins.png"]
     if check_plots_exist(plot_filenames, plots_dir):
         return
