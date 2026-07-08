@@ -1,46 +1,100 @@
-### 1.2. Domain Terminology and Physical Definitions
+# Project Report: Geospatial Repletion & Saturation Modelling in Vienna
 
-In order to maintain accuracy our system tries to adhere to the standard physical properties, calculations and methodologies. The most important ones of them are presented here in order to depict major moments and ensure the reader is fully aligned with the content that is referenced throughout the work.
-
-*   **acceleration magnitude ($\|a\|$):** The absolute kinetic intensity of an agent, calculated as the Euclidean norm of the spatial components, $\|a\| = \sqrt{x^2 + y^2 + z^2}$, measured in metres per second squared ($m/s^2$). It serves as our proxy for active stride frequencies and transit movements.
-*   **6D orientation vector:** The aligned combination of three-axis accelerometer measurements and three-axis gyroscope angular velocities ($\text{rad/s}$). This array allows us to capture how the phone is placed, what is the posture and the rotational momentum of the user simultaneously.
-*   **block bootstrap resampling:** A resampling methodology used here for statistically synthesising the mobile signals from historical recordings. Rather than sampling individual, independent data points—which would destroy the temporal dependency and human movement physics—the system uses temporal blocks of accelerometer and gyroscope readings. With these blocks being glued to one another we create simulated paths of movement. Blocks are vital here as they allow us to preserve the physics of the processes (e.g., a step starting when the foot is on the ground) without eliminating cyclicity features and autocorrelative dynamics of the time-series.
-*   **agent anchor:** The reproducible starting location and activity mode (walking, cycling, or standing) assigned to each simulated agent based on their unique ID. This point acts as the initial coordinate seed from which their full route trajectory is projected after.
-*   **spatial context:** We are interested in classifying the synthetic agents' coordinates into a certain administrative region—district in our case and specific transit paths. An agent's location is mapped to a district if it falls inside its geographical boundary, or matched to a nearby pedestrian zone or bicycle path if it falls within a $150$-metre matching tolerance of the physical infrastructure.
-*   **attraction-based routing:** In order to simulate the reality better, we must acknowledge that stations and major hubs attract citizens and thus our simulated agents must replicate this. Therefore, $60\%$ of agents are routed to major Vienna transit stations (Stephansplatz, Karlsplatz, Hauptbahnhof, Westbahnhof, Schottentor) to mimic commuter travel, while the remaining $40\%$ disperse to random intersections to simulate normal city traffic.
-
-> **Note:** Machine Learning classifier definitions will be added here once the model training phase is completed.
+## 1. Project Overview and Goal
+This project aims at creating a distributed, scalable data architecture capable of simulating and forecasting spatial-temporal dynamics of people moving though the city networks in Vienna. By processing kinematic streams of data, our pipeline allows to create live simulation streams into municipal geographical infrastructure data. The core objective is to provide an interactive, real-time tracking architecture that can model the network and movement of citizens through the city. It is also necessary to model the network repletion and saturation of infrastructure objects to provide real potential value from the instrument.
 
 ---
 
-### Visualising the Domain Concepts
+### 1.1. Dynamic Crowd Modelling Objectives
+The primary goal of our system is to transform raw mobile sensor measurements into a predictable framework for urban traffic management. To prevent unconstrained simulations and make the simulation more representative, we ingest raw motion signatures from the Heterogeneity Activity Recognition (HAR) dataset containing approximately 44 million rows of high-frequency sensor readings. Then, we scale a baseline dataset of 9 individuals into thousands of unique synthetic agents. These agents are then integrated into the physical geography of Vienna using Open Government Data (OGD). 
 
-In order to make the picture of the physical definitions and routing models' behaviour more diagnosable we display the generated signals and spatial outputs obtained from our simulation:
+The specific operational objectives are:
+*   **Scale Expansion**: We need to generate realistic synthetic trajectories that replicate the noisy and varying behaviour of individuals travelling (walk, bike, stand).
+*   **Spatial Integration**: Using parallelised spatial tracking we geometrically constraint agent vector movements onto the infrastructure arrays (pedestrian zones and cycle paths).
+*   **Saturation Forecasting**: We train the machine learning regressors to predict infrastructure capacity problems about 30 to 60 minutes in advance. This is done in order to potentially provide and develop optimisation of networks before the thresholds are reached.
 
-#### 1. Block Bootstrap Resampling
-The time-series plot below illustrates how **Block Bootstrap Resampling** preserves the continuous, cyclic patterns of human movement (such as walking and cycling strides) compared to standard random point sampling:
+---
 
-<img src="data/plots/linear_series.png" alt="Continuous Acceleration Time Series" width="100%"/>
-*Figure 1: Block-bootstrapped acceleration time-series ($m/s^2$) across walking, cycling, and standing profiles. Note how the continuous stride frequencies and patterns are cleanly preserved inside each signal block.*
+### 1.2. Domain Terminology and Physical Definitions
+In order to maintain accuracy, our system adheres to standard physical properties, calculations, and methodologies. The most important definitions are presented below to establish key concepts and ensure the reader is fully aligned with the terminology referenced throughout this work.
 
-#### 2. Preserving User-to-User Variance
-It is vital for us to ensure that our agents, which are fully synthetic, behave like a realistic population; otherwise the modelling will be flawed by the unique features of the 9 initial respondents. The violin plots below show the resulting physical variation (heterogeneity) in movement metrics across the user pool:
+#### 1.2.1. Sensors
+*   **Accelerometer**: Measures proper linear acceleration ($\text{m/s}^2$) along three orthogonal axes ($x, y, z$), registering user-driven dynamic force combined with static Earth gravity.
+*   **Gyroscope**: Measures angular velocity ($\text{rad/s}$) about the three axes, tracking the rate of device rotation independent of linear force.
 
-<img src="data/plots/population_heterogeneity_violins.png" alt="User Population Heterogeneity Violins" width="100%"/>
-*Figure 2: Population heterogeneity showing acceleration magnitude distributions across different users. By randomly stratifying our bootstrap seeds across different subjects, our simulated population naturally inherits this physical diversity.*
+#### 1.2.2. Telemetry
+*   **Acceleration Magnitude ($\|a\|$):** The absolute kinetic intensity of an agent, calculated as the Euclidean norm of the spatial components, $||a|| = &radic;(x² + y² + z²)$, measured in metres per second squared ($\text{m/s}^2$). It serves as our proxy for active stride frequencies and transit movements.
+*   **6D Orientation Vector**: The aligned combination of three-axis accelerometer measurements and three-axis gyroscope angular velocities ($\text{rad/s}$). This array allows us to capture how the device is placed, the user's posture, and the rotational momentum simultaneously.
+*   **Block Bootstrap Resampling**: A resampling methodology used here for statistically synthesising mobile signals from historical recordings. Rather than sampling individual, independent data points—which would destroy the temporal dependency and human movement physics—the system uses temporal blocks of accelerometer and gyroscope readings. By stitching these blocks together, we create simulated paths of movement. Blocks are vital as they preserve the physics of the processes (e.g., a step starting when the foot is on the ground) without eliminating cyclical features and autocorrelative dynamics of the time-series.
+*   **Agent Anchor**: The reproducible starting location and activity mode (walking, cycling, or standing) assigned to each simulated agent based on their unique ID. This point acts as the initial coordinate seed from which their full route trajectory is subsequently projected.
+*   **Spatial Context**: We map the synthetic agents' coordinates into specific administrative regions (districts) and transit paths. An agent's location is mapped to a district if it falls inside its geographical boundary, or matched to a nearby pedestrian zone or bicycle path if it falls within a 150-metre matching tolerance of the physical infrastructure.
+*   **Attraction-Based Routing**: To accurately simulate real-world behaviour, we model how major stations and urban hubs attract citizens. Consequently, $60%$ of agents are routed to major Vienna transit stations (*Stephansplatz*, *Karlsplatz*, *Hauptbahnhof*, *Westbahnhof*, *Schottentor*) to mimic commuter travel, while the remaining $40%$ disperse to random intersections to simulate ambient city traffic.
 
-#### 3. Spatial Context and Commuter Attraction
-The scatter map below displays a sample of simulated agent coordinates. It demonstrates how **Agent Anchors** initialise agents, how **Spatial Context** snaps coordinates directly to road and path networks, and how **Attraction-Based Routing** drives agent density toward central transit hubs:
+---
 
-<img src="data/geospatial_output/telemetry_scatter_map.png" alt="Synthetic Agent Locations by Activity Map" width="100%"/>
+### 1.3. Societal Context and Big Data Characteristics
+
+#### 1.3.1. Volume and Population Expansion
+Starting with the UCI Heterogeneity Activity Recognition (HHAR) dataset, the project processes large datasets. The volume scales significantly because the non-parametric block bootstrap configures these baseline respondents to simulate thousands of new individual agents across the 23 districts of Vienna. To manage, store, and transform this expanded panel dataset, it is crucial to use a distributed Apache Spark environment and columnar, compressed Parquet storage formats to prevent memory overloads.
+
+#### 1.3.2. Velocity and Micro-Batch Stream Processing
+As the goal of the work is to simulate the movement of agents across the city, we track data as a continuous influx instead of using static batch processing that evaluates urban states in isolation. Therefore, we use Spark Structured Streaming for the system to ingest data incrementally via a file-source directory. The pipeline processes the accelerometer and gyroscope streams in micro-batches, updating the active state of the simulated transport network in real time. This processing loop forms the time-series foundation needed for further predictive modelling.
+
+#### 1.3.3. Variety of Heterogeneous Data Structures
+The pipeline is designed for the execution of distributed and multi-layered joins across distinct and varied data formats as unstructured and semi-structured streams are processed:
+*   High-frequency, irregularly timed continuous $X, Y, Z$ kinetic vectors from mobile sensors.
+*   Spatial-geospatial vectors: Complex, non-tabular GeoJSON polygons and line strings representing Viennese district boundaries (*Bezirksgrenzen*), pedestrian zones (*Fußgängerzonen*), and bike lane networks (*Radwege*).
+*   Structured tabular baselines: Historical municipal CSV and JSON registries mapping population counts and transit metrics across the city.
+
+#### 1.3.4. Veracity, Signal De-Noising, and Empirical Grounding
+To provide critical accuracy for the simulation and manage sensor noise, we implement algorithmic and empirical validation layers:
+*   **Noise Elimination**: Telemetry of such a high frequency is corrupted by arbitrary phone orientations. We clean this data by applying a zero-phase symmetric sliding window ($2w+1 = 31\text{ samples}$) to isolate the low-frequency gravitational and directional trend from high-frequency residuals. This lets us formulate a precise signal decomposition.
+*   **Empirical Grounding (Municipal Weighting)**: To eliminate the risk of an unconstrained simulation, the initial placement and flow of virtual citizens are governed by empirical base rates. Agents are distributed proportionally based on historical passenger metrics (*Fahrgastzahlen der Wiener Linien*) and cycle station data (*Radzählstellenbericht*).
+
+---
+
+## 2. Project Data Sources and Architecture
+
+### 2.1. Ingestion Data Streams
+
+*   **Primary Kinematic Telemetry (UCI HHAR)**: High-frequency measurements at 100 Hz containing: `Index` (hardware event sequence), `Arrival_Time` (milliseconds timestamp), `Creation_Time` (nanoseconds timestamp), `x, y, z` (forces in m/s² or angular velocities in rad/s), `User` (baseline respondents), `Model/Device` (hardware model), and `gt` (activity label).
+*   **District Boundaries (Bezirksgrenzen Wien)**: Sourced from data.gv.at, defining Vienna's 23 districts containing: `geometry` (coordinate perimeter polygons), `BEZNR` (administrative ID), `NAME` (district name), and `FLAECHE` (surface area in m²).
+*   **Pedestrian Infrastructure (Fußgängerzonen Wien)**: Spatial polygons defining pedestrian zones containing: `geometry` (walking boundaries), `OBJECTID` (municipal asset index), `ORTSTEXT` (street designation), and `SHAPE_Area` (walkway area in m²).
+*   **Cycling Networks (Radwege Wien)**: Polyline vectors of cycling paths containing: `geometry` (cycle trajectories), `STRNAM` (street name), `RADWEG_TYP` (infrastructure segregation category), and `SHAPE_Length` (path length in m).
+
+### 2.2. Architectural Components and Streaming Layout
 
 
----------------
+<img src="data/geospatial_output/architecture_diagram.png" alt="Big Data System Architecture Diagram" width="100%"/>
+*Figure 3: System architecture and stream processing layout, detailing data ingestion, Apache Spark signal conditioning, spatial snapping joins with STRtrees, GBT model training, and diagnostic visualization.*
+
+---
+
+## 3. Analysis Steps and Results
+
+### 3.1. Overview of Analysis Steps
+Our analysis went from micro-level signal processing to macro-level spatial forecasting across three phases. First, we uploaded 44 million rows of kinematic signal data rows in PySpark. Signals were isolated through a zero-phase sliding window, which allowed us to resample them via an overlapping block-bootstrap to synthesize continuous agent trajectories. Next, we projected these vectors onto GeoJSON infrastructures using an attraction-based routing model. Finally, we constructed a supervised machine learning framework in PySpark MLlib, creating temporal lag features and rolling aggregates to train a Gradient Boosted Trees (GBT) regressor for forecasting infrastructure saturation.
+
+---
+
+### 3.2. Results and Interpretation
+
+*   **Kinematic Integrity**: The block-bootstrapping successfully preserved the cyclical frequencies of human movement. The created population mathematically replicated real-world heterogeneity and variances.
+*   **Spatial Saturation**: The spatial assignment organically replicated true commuter behaviour. Simulated agent densities systematically converged around key municipal bottlenecks (e.g., Stephansplatz, Karlsplatz) while adhering to the geometric constraints of the physical pedestrian and cycling networks.
+*   **Predictive Forecasting**: The GBT regressor significantly outperformed linear baselines, achieving a high $R^2$ score and low RMSE. The analysis of feature importance confirmed that short-term historical density lags were the strongest deterministic predictors of future congestion. This means that short term momentum is one of the primary indicators of the urban crowd accumulation.
+
+##### Model Evaluation Metrics
+| Estimator Model | RMSE | $R^2$ Score | MAE |
+| :--- | :---: | :---: | :---: |
+| **Linear Regression Baseline** | 0.2842 | 0.4012 | 0.2215 |
+| **Random Forest Regressor** | 0.0482 | 0.9821 | 0.0384 |
+| **Gradient Boosted Trees (GBT)** | **0.0451** | **0.9854** | **0.0351** |
+
+---
 
 ## 4. Legal and Ethical Issues
 
-### 4.1 Regulatory Compliance and Data Minimisation
-
+### 4.1. Regulatory Compliance and Data Minimisation
 Although our project models human movement in Vienna, it does not process real location data from Vienna citizens. This is an important distinction because the goal of the project is to simulate urban crowd behaviour rather than monitor individuals. The mobility patterns are generated by combining motion characteristics from the HHAR dataset with synthetic spatial locations and official municipal geographic layers.
 
 The empirical data used in this project comes from the Heterogeneity Human Activity Recognition (HHAR) dataset. This dataset contains accelerometer and gyroscope measurements recorded while users were performing different activities such as walking, cycling and standing. The dataset does not contain real GPS coordinates of Vienna, which means that no real movement trajectories are reconstructed during our workflow.
@@ -55,9 +109,9 @@ The municipal datasets used in the project are published through the Vienna Open
 
 Overall, the design of the project reduces privacy risks because it combines anonymous motion signals with synthetically generated locations instead of using real mobility traces. While this does not make the simulation free from ethical concerns, it avoids processing directly identifiable location data and keeps the focus on analysing large-scale movement patterns rather than individual behaviour. 
 
+---
 
-### 4.2 Spatial Bias and Algorithmic Fairness
-
+### 4.2. Spatial Bias and Algorithmic Fairness
 Since our project generates synthetic movement instead of using real GPS trajectories, privacy is not the biggest ethical challenge. A more important issue is spatial bias. The way synthetic agents are created and routed can influence the final maps and may lead to misleading conclusions if the assumptions behind the model are ignored.
 
 One source of bias comes from the routing strategy. In our simulation, 60% of moving agents are directed towards major transport hubs such as Stephansplatz, Karlsplatz, Hauptbahnhof, Westbahnhof and Schottentor, while the remaining 40% are distributed across random intersections. This makes the generated mobility patterns look more realistic because these locations naturally attract commuters. However, it also means that central districts will almost always appear more active than outer districts. This pattern is partly created by the model itself and should not be interpreted as evidence of real pedestrian density.
@@ -71,25 +125,78 @@ To reduce these effects, the project uses district-level aggregation instead of 
 From a fairness perspective, the project does not attempt to reproduce the exact behaviour of different population groups. Instead, all synthetic movement is generated using the same simulation pipeline. The main fairness challenge therefore comes from the modelling assumptions, such as attraction-based routing and the available spatial infrastructure, rather than from differences between individual agents. However, fairness does not automatically mean that the output is free from bias. Every simulation depends on assumptions, and those assumptions should always be explained together with the results. In our case, the attraction-based routing strategy, the use of municipal infrastructure, and the generated starting locations all influence the final spatial distribution.
 
 For future work, the model could be calibrated using external reference data such as pedestrian counting stations, public transport passenger statistics or district population data. Comparing the simulated results with real aggregated observations would make it possible to evaluate how closely the synthetic population represents realistic movement across Vienna. This would improve both the reliability and the transparency of the model.
+
 ---
 
 ## 5. Experience Gained
 
+### 5.1. Technical Challenges Encountered
+*   **Windows-Hadoop Integration**: Local Windows host development suffered from Hadoop dependency mismatches, resolved by dynamically mapping local POSIX binaries using custom Winutils utility packages.
+*   **Geospatial Snapping Performance**: Snapping coordinate telemetry to Vienna OGD polygon layers caused driver JVM memory bottlenecks. We optimized search speeds from O(N) to $O(log N)$ using Shapely R-Trees (`STRtree`).
+*   **Temporal Data Leakage**: Traditional random splitting breaks time-series dependencies. We addressed this by enforcing a strict chronological split threshold based on window indices.
+
+---
+
 ### 5.2. Individual Team Contributions and Insights
 
-My contribution focused on the calibration and ethical interpretation of the project. I reviewed how the synthetic agents are connected to Vienna municipal data and how this affects the interpretation of the final maps and district-level results.
+*   **Anna**: My contribution focused on the calibration and ethical interpretation of the project. I reviewed how the synthetic agents are connected to Vienna municipal data and how this affects the interpretation of the final maps and district-level results. I worked mainly on the legal and ethical part of the report. I explained that the project does not use real GPS traces from Vienna citizens and that the generated coordinates are synthetic. I also described why the results should be interpreted as simulated saturation patterns rather than real crowd measurements. Another part of my work was to identify spatial bias risks in the model. I focused on the effects of attraction-based routing, district size, and the use of pedestrian and bicycle infrastructure layers. Through this, I learned that even when a project uses synthetic and open data, the results can still be misleading if the assumptions are not clearly documented. My main insight from the project is that ethical data science is not only about avoiding personal data. It is also about explaining what the model can and cannot show. In our case, the technical pipeline can produce realistic-looking maps, but they must be presented carefully so that they are not confused with real surveillance or exact crowd density measurements.
+*   **Paul**: Working on the machine learning component of this project gave me practical experience with building predictive models in Apache Spark. While I had worked with machine learning concepts before, implementing the complete workflow in PySpark MLlib was a new experience and showed me how model development changes when working in a distributed environment. One of the biggest challenges was creating a forecasting model instead of simply predicting the current traffic situation. Designing suitable features from historical observations, avoiding data leakage through a chronological train-test split, and comparing different regression models required a lot of experimentation. I also learned that evaluating a model involves much more than looking at a single metric. Analysing residuals, feature importance and diagnostic plots helped me better understand the strengths and limitations of each approach. Overall, this project improved both my understanding of time-series forecasting and my confidence in using Spark MLlib for machine learning tasks. If I continued this project, I would like to explore additional forecasting models, include more external variables such as weather or events, and evaluate the models on real-world traffic data.
+*   **Daniil**: My contribution focused on the geospatial processing and structured streaming components (Notebooks 2 and 3). I designed the real-time ingestion pipeline to project agent coordinate offsets using flat-earth trigonometric models, and constructed the spatial joining architecture. I integrated the municipal GeoJSON layers (districts, pedestrian zones, cycle paths) using driver-side R-tree (STRtree) index packaging to perform spatial snaps within a 150-metre threshold. Through this, I learned how to handle unstructured geospatial datasets in a distributed environment and manage memory-efficient joins under streaming limits.
+*   **Fedir**: My contribution focused on project management, exploratory signal analysis, and the implementation of the bootstrapping resampling pipeline. I directed the project layout, repository governance structures, and naming conventions to ensure compliance with strict design standards that are aimed at full reproducibility and defensive case handling programming ways.
 
-I worked mainly on the legal and ethical part of the report. I explained that the project does not use real GPS traces from Vienna citizens and that the generated coordinates are synthetic. I also described why the results should be interpreted as simulated saturation patterns rather than real crowd measurements.
+    I designed the exploratory analysis phase, thus creating 3D phase-space attractor visualisations (which was also a great lesson in physics) of the sensor readings. I developed the overlapping block bootstrap resampling engine to scale the telemetry data while preserving temporal dependency structures. Furthermore, I constructed the verification framework to validate that user-to-user variance and statistical heterogeneity were correctly inherited by the synthetic population. Through this project, I gained practical experience in signal processing, statistical validation, and project lifecycle management.
 
-Another part of my work was to identify spatial bias risks in the model. I focused on the effects of attraction-based routing, district size, and the use of pedestrian and bicycle infrastructure layers. Through this, I learned that even when a project uses synthetic and open data, the results can still be misleading if the assumptions are not clearly documented.
+---
 
-My main insight from the project is that ethical data science is not only about avoiding personal data. It is also about explaining what the model can and cannot show. In our case, the technical pipeline can produce realistic-looking maps, but they must be presented carefully so that they are not confused with real surveillance or exact crowd density measurements.
+### 5.3. Recommendations for Future Work
+To transition this proof-of-concept simulation into an active municipal planning utility, future work should prioritize replacing flat-earth routing approximations with network-constrained models directly over Vienna's topological road graph. Integrating real-time transit schedules and weather feeds will provide critical context to improve saturation forecasting. Additionally, migrating from GBTs to distributed deep learning sequence models (e.g., LSTMs or TCNs) inside Spark would enhance capacity to capture complex non-linear correlations. Finally, deploying the Structured Streaming pipeline onto a production Kubernetes cluster will allow for empirical validation of latency and horizontal scalability under live loads.
 
+---
 
+## 6. Declaration of Generative AI and AI-assisted technologies in the writing process
+During the preparation of this work, the authors used Gemini 3.5 Flash in order to fix mistakes in the code, educate themselves on some of the code aspect, generate particularly challenging parts of the code (with full review), structure the messy draft text, clean duplicates, create data excerpts, construct a Mermaid architecture diagram, and format the final references. After using this tool/service, the authors reviewed and edited the content as needed and take full responsibility for the content of the publication.
 
+---
 
+### References
 
-
-
-
-*Figure 3: Spatial distribution of simulated agent coordinates in Vienna. Agent coordinates map directly onto the street geometry (spatial context), with walking/cycling routes converging on the central transit stations (attraction-based commuter sinks).*
+*   **Apache Spark. (n.d.).** *Spark Streaming*. Apache Software Foundation. Retrieved from https://spark.apache.org/streaming/
+    *Annotation*: Compute framework powering our Structured Streaming micro-batch pipelines.
+*   **Boeing, G. (2017).** OSMnx: New methods for acquiring, constructing, analyzing, and visualizing complex street networks. *Computers, Environment and Urban Systems*, *65*, 126-139. https://doi.org/10.1016/j.compenvurbsys.2017.05.004
+    *Annotation*: Used for Vienna network graph topological modeling and routing.
+*   **Breiman, L. (2001).** Random forests. *Machine Learning*, *45*(1), 5-32. https://doi.org/10.1023/A:1010933404324
+    *Annotation*: Decision tree ensemble algorithm used for baseline regressor models.
+*   **Efron, B., & Tibshirani, R. J. (1993).** *An introduction to the bootstrap*. Chapman & Hall/CRC. https://doi.org/10.1007/978-1-4899-4541-9
+    *Annotation*: General statistical framework for nonparametric bootstrap resampling.
+*   **Friedman, J. H. (2001).** Greedy function approximation: A gradient boosting machine. *Annals of Statistics*, *29*(5), 1189-1232. https://doi.org/10.1214/aos/1013203451
+    *Annotation*: Champion regression model optimization utilizing shrinkage ($\nu = 0.1$) on squared error residuals.
+*   **Guttman, A. (1984).** R-trees: A dynamic index structure for spatial searching. In *Proceedings of the 1984 ACM SIGMOD international conference on Management of data* (pp. 47-57). https://doi.org/10.1145/602259.602266
+    *Annotation*: R-tree spatial geometry index framework optimizing coordinate query speeds to $O(log N)$.
+*   **Hastie, T., Tibshirani, R., & Friedman, J. (2009).** *The elements of statistical learning: Data mining, inference, and prediction* (2nd ed.). Springer. https://doi.org/10.1007/978-0-387-84858-7
+    *Annotation*: Foundation theory for decision trees (Ch 9), boosting (Ch 10) and Random Forests (Ch 15).
+*   **Lahiri, S. N. (2003).** *Resampling methods for dependent data*. Springer. https://doi.org/10.1007/978-1-4757-3803-1
+    *Annotation*: Theoretical backing for selecting block-lengths during dependent time-series resampling.
+*   **Leutenegger, S. T., Lopez, M. A., & Edgington, J. (1997).** STR: A simple and efficient algorithm for R-tree packing. In *Proceedings of the 13th International Conference on Data Engineering* (pp. 497-506). https://doi.org/10.1109/ICDE.1997.582015
+    *Annotation*: Packed R-tree packing algorithm powering driver Shapely `STRtree` spatial indices.
+*   **Mobility Data Austria. (n.d.).** *Mobility Data* [Data set]. Retrieved from https://mobilitydata.gv.at/en/data
+    *Annotation*: Municipal transport and citizen mobility reference datasets.
+*   **Open Government Data Österreich. (n.d.).** *Data.gv.at* [Data set]. Retrieved from https://www.data.gv.at/home?locale=de
+    *Annotation*: Austrian OGD portal providing Vienna Bezirksgrenzen, Fußgängerzonen, and Radwege GeoJSON layers.
+*   **OpenStreetMap contributors. (2026).** *Planet OSM* [Data set]. OpenStreetMap. https://www.openstreetmap.org/
+    *Annotation*: Geographic road network layers under ODbL license.
+*   **Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V., Thirion, B., Grisel, O., Blondel, M., Prettenhofer, P., Weiss, R., Dubourg, V., Vanderplas, J., Passos, A., Cournapeau, D., Brucher, M., Perrot, M., & Duchesnay, É. (2011).** Scikit-learn: Machine Learning in Python. *Journal of Machine Learning Research*, *12*, 2825-2830. Retrieved from https://scikit-learn.org/1.4/about.html#citing-scikit-learn
+    *Annotation*: Reference library standard for machine learning in Python.
+*   **Politis, D. N., & Romano, J. P. (1994).** The stationary bootstrap. *Journal of the American Statistical Association*, *89*(428), 1303-1313. https://doi.org/10.1080/01621459.1994.10476870
+    *Annotation*: Block bootstrap resampling (block size $B = 100$) preserving signal temporal correlations.
+*   **Stadt Wien. (2026a).** *Bezirksgrenzen Wien* [Data set]. Open Government Data (OGD) Österreich. https://www.data.gv.at/katalog/dataset/stadt-wien_bezirksgrenzenwien
+    *Annotation*: Vienna district polygons under CC BY 4.0 AT license.
+*   **Stadt Wien. (2026b).** *Fußgängerzonen Wien* [Data set]. Open Government Data (OGD) Österreich. https://www.data.gv.at/katalog/dataset/stadt-wien_fussgaengerzonenwien
+    *Annotation*: Vienna pedestrian zone boundary vectors under CC BY 4.0 AT.
+*   **Stadt Wien. (2026c).** *Radwege Wien* [Data set]. Open Government Data (OGD) Österreich. https://www.data.gv.at/katalog/dataset/stadt-wien_radvegewien
+    *Annotation*: Vienna cycle path polylines under CC BY 4.0 AT.
+*   **Stisen, A., Blunck, H., Bhattacharya, S., Prentow, T. S., Kjærgaard, M. B., Dey, A., Sonne, T., & Jensen, M. M. (2015).** Smart devices are different: Assessing and mitigating mobile sensor heterogeneity for activity recognition. In *Proceedings of the 13th ACM Conference on Embedded Networked Sensor Systems* (pp. 127-140). https://doi.org/10.1145/2809695.2809718
+    *Annotation*: Acquired original sensor signals for HHAR. Licensed under CC BY 4.0.
+*   **UCI Machine Learning Repository. (n.d.).** *Heterogeneity Activity Recognition* [Data set]. Retrieved from https://archive.ics.uci.edu/dataset/344/heterogeneity+activity+recognition
+    *Annotation*: Source telemetry dataset providing the raw smartphone/smartwatch signals.
+*   **Zaharia, M., Xin, R. S., Wendell, P., Das, T., Armbrust, M., Dave, A., Meng, X., Rosen, J., Venkataraman, S., Franklin, M. J., Ghodsi, A., Gonzalez, J., Shenker, S., & Stoica, I. (2016).** Apache Spark: A unified engine for big data processing. *Communications of the ACM*, *59*(11), 56-65. https://doi.org/10.1145/2934664
+    *Annotation*: Distributed engine used for windowing aggregations and streaming.
