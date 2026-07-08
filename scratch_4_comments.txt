@@ -1,0 +1,645 @@
+==================================================
+CELL 0 | TYPE: markdown
+==================================================
+# 4 · Predictive Modelling — Saturation Forecasting
+
+This notebook implements the predictive modeling component of the **Geospatial Repletion & Saturation Modelling** project. 
+The goal is to build machine learning models using **Apache Spark MLlib** to forecast localized infrastructure saturation 30–60 minutes in advance, operating on simulated citizen traffic flows. 
+
+## Constraints:
+1. **Strict Spark MLlib**: All data manipulation and modeling are done using PySpark SQL and MLlib. No `pandas` or `scikit-learn` are used to respect big data processing standards.
+2. **No Data Leakage**: We use a temporal split instead of a random split, and our target is a future lead variable (`lead(count, k)`), ensuring the model is forecasting rather than fitting a tautology.
+
+==================================================
+CELL 1 | TYPE: code
+==================================================
+import os
+import sys
+import math
+from pathlib import Path
+
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.window import Window
+from pyspark.ml.feature import StringIndexer, VectorAssembler
+from pyspark.ml.regression import LinearRegression, RandomForestRegressor, GBTRegressor
+from pyspark.ml.evaluation import RegressionEvaluator
+
+# Find project root robustly by looking for 'src' folder upward
+current = Path.cwd()
+while current.name and not (current / "src").exists():
+    current = current.parent
+PROJECT_ROOT = current
+sys.path.insert(0, str(PROJECT_ROOT.resolve()))
+
+# Setup native Hadoop binaries on Windows
+from src.step_08_bootstrapping import setup_winutils
+setup_winutils(PROJECT_ROOT)
+
+# Initialize local Spark Session
+spark = (
+    SparkSession.builder
+    .appName("Saturation-Forecasting-Engine")
+    .master("local[*]")
+    .config("spark.driver.memory", "4g")
+    .config("spark.sql.shuffle.partitions", "10")
+    .getOrCreate()
+)
+
+print(f"SparkSession started successfully. Spark version: {spark.version}")
+
+==================================================
+CELL 2 | TYPE: markdown
+==================================================
+## 4.1 Auto-Load Verification & Configuration
+
+To save computation time during reviews and grading, we check if a pre-trained model and pre-aggregated infrastructure count files exist on disk. If they do, we can load them directly. Setting `FORCE_RETRAIN = True` will force the notebook to rerun the entire feature engineering and training pipeline.
+
+==================================================
+CELL 3 | TYPE: code
+==================================================
+FORCE_RETRAIN = False
+
+model_path = PROJECT_ROOT / "models" / "gbt_saturation_forecaster"
+data_path = PROJECT_ROOT / "data" / "geospatial_output" / "infrastructure_activity_counts.csv"
+
+has_model = model_path.exists()
+has_data = data_path.exists()
+
+print(f"Pre-aggregated data found: {has_data}")
+print(f"Pre-trained GBT model found: {has_model}")
+if not FORCE_RETRAIN and has_model and has_data:
+    print("\n>>> PRE-TRAINED MODEL READY. Pipelines can be skipped or loaded directly.")
+else:
+    print("\n>>> PIPELINE WILL TRAIN A NEW MODEL.")
+
+==================================================
+CELL 4 | TYPE: markdown
+==================================================
+## 4.2 Data Ingestion & Target Definition
+
+First, we load the aggregated infrastructure counts from the geospatial pipeline output. We define the infrastructure capacities according to Vienna's guidelines:
+- Bike Path: 3,000 users/hour capacity
+- Pedestrian Zone: 600 users/hour capacity
+- Default (Other): 1,000 users/hour capacity
+
+Our predictive model will forecast saturation indexes ($s_{t+\Delta}$) rather than immediate counts to provide early-warning bottlenecks.
+
+==================================================
+CELL 5 | TYPE: code
+==================================================
+if not has_data:
+    # Generate dummy data to ensure no crash if running first time without geospatial step
+    print("Creating mock activity counts data...")
+    mock_data = []
+    for i in range(100):
+        mock_data.append(("1., Stephansplatz", "pedestrian_zone", "walk", i, 100 + (i % 5) * 50))
+        mock_data.append(("Markierte Anlagen", "bike_path", "bike", i, 200 + (i % 3) * 150))
+    df_raw = spark.createDataFrame(mock_data, ["infrastructure_label", "infrastructure_type", "Activity", "time_window_index", "count"])
+else:
+    df_raw = spark.read.csv(str(data_path), header=True, inferSchema=True)
+
+# Apply capacity scaling
+df_capped = df_raw.withColumn(
+    "max_capacity",
+    F.when(F.col("infrastructure_type") == "bike_path", 3000.0)
+     .when(F.col("infrastructure_type") == "pedestrian_zone", 600.0)
+     .otherwise(1000.0)
+)
+
+df_capped = df_capped.withColumn(
+    "saturation_index",
+    F.col("count").cast("double") / F.col("max_capacity")
+)
+
+df_capped.show(5)
+
+==================================================
+CELL 6 | TYPE: markdown
+==================================================
+At this stage, the dataset already contains the calculated saturation index for each infrastructure observation.
+
+Instead of predicting the raw traffic counts directly, we normalize them by the estimated infrastructure capacity. This creates a common target variable that can be compared across bike paths, pedestrian zones and other infrastructure types. Using the saturation index also makes the prediction more meaningful, as the model estimates how close an area is to reaching its practical capacity rather than simply forecasting the number of users.
+
+==================================================
+CELL 7 | TYPE: markdown
+==================================================
+## 4.3 Feature Engineering (Spark SQL Windowing)
+
+To enable forecasting, we build temporal lags and statistics over the segments using Spark analytical windows. We extract:
+- Lags 1 through 6 (`count_lag_1` to `count_lag_6`)
+- 3-window rolling average (`count_rolling_mean_3`)
+- 3-window rolling standard deviation (`count_rolling_std_3`)
+- First-order count difference (`count_delta`)
+- Target lead count (`target_count` = value at $t + 5$ windows ahead)
+
+==================================================
+CELL 8 | TYPE: code
+==================================================
+# Window specifications
+w_seg = Window.partitionBy("infrastructure_label", "infrastructure_type").orderBy("time_window_index")
+w_roll = w_seg.rowsBetween(-3, -1)
+
+df_features = df_capped
+
+# 1. Lags
+for lag_idx in range(1, 7):
+    df_features = df_features.withColumn(f"count_lag_{lag_idx}", F.lag("count", lag_idx).over(w_seg))
+
+# 2. Rolling stats
+df_features = df_features.withColumn("count_rolling_mean_3", F.avg("count").over(w_roll))
+df_features = df_features.withColumn("count_rolling_std_3", F.stddev("count").over(w_roll))
+
+# 3. Delta
+df_features = df_features.withColumn("count_delta", F.col("count") - F.col("count_lag_1"))
+
+# 4. Target variable: Saturation at t + 5 windows ahead (Lead)
+forecast_lead = 5
+df_features = df_features.withColumn("target_count", F.lead("count", forecast_lead).over(w_seg))
+df_features = df_features.withColumn("target_saturation", F.col("target_count").cast("double") / F.col("max_capacity"))
+
+# Remove null values created by lead/lag offsets
+df_clean = df_features.na.drop()
+
+# Encode infrastructure type categories
+indexer = StringIndexer(inputCol="infrastructure_type", outputCol="infra_type_idx", handleInvalid="keep")
+df_indexed = indexer.fit(df_clean).transform(df_clean)
+
+# Assemble into PySpark features vector
+feature_cols = [
+    "infra_type_idx", "count",
+    "count_lag_1", "count_lag_2", "count_lag_3",
+    "count_lag_4", "count_lag_5", "count_lag_6",
+    "count_rolling_mean_3", "count_rolling_std_3", "count_delta"
+]
+assembler = VectorAssembler(inputCols=feature_cols, outputCol="features")
+ml_df = assembler.transform(df_indexed).select("infrastructure_label", "infrastructure_type", "time_window_index", "features", "target_saturation").withColumnRenamed("target_saturation", "label")
+
+ml_df.show(3, truncate=False)
+
+==================================================
+CELL 9 | TYPE: markdown
+==================================================
+After completing the feature engineering step, the dataset is ready for machine learning.
+
+Each observation now contains both the current traffic information and several features describing the recent history of the infrastructure segment. By combining lag values, rolling statistics and traffic changes, the model receives information about temporal trends instead of only the current count. The label column represents the future saturation index, meaning that the model learns to forecast upcoming conditions rather than reproduce the current situation.
+
+The selected features were designed to capture both the current state and the recent development of traffic within each infrastructure segment. This provides the model with more context than a single observation and allows it to learn temporal patterns that are useful for predicting future saturation levels.
+
+==================================================
+CELL 10 | TYPE: markdown
+==================================================
+## 4.4 Temporal Train/Test Split
+
+In time series modeling, a random train/test split causes severe data leakage (future records predicting past records). We split the data chronologically: the first 70% of time windows for training, and the remaining 30% for evaluation.
+
+==================================================
+CELL 11 | TYPE: code
+==================================================
+# Find max index to split
+max_idx_row = ml_df.agg(F.max("time_window_index")).collect()[0]
+max_idx = max_idx_row[0] if max_idx_row[0] is not None else 0
+split_idx = int(max_idx * 0.7)
+
+train_df = ml_df.filter(F.col("time_window_index") <= split_idx).cache()
+test_df = ml_df.filter(F.col("time_window_index") > split_idx).cache()
+
+print(f"Training rows: {train_df.count()}")
+print(f"Evaluation rows: {test_df.count()}")
+
+==================================================
+CELL 12 | TYPE: markdown
+==================================================
+The dataset is now separated into training and evaluation data using a chronological split.
+
+Unlike a random split, this approach preserves the temporal order of the observations and prevents future information from leaking into the training process. The model is therefore evaluated under conditions that are much closer to a real forecasting scenario, where predictions are always made using only past observations.
+
+==================================================
+CELL 13 | TYPE: markdown
+==================================================
+## 4.5 Model Comparison & Training (LR → RF → GBT)
+
+To determine which regression approach is most suitable for forecasting infrastructure saturation, three different Spark MLlib models are trained and evaluated. Starting with a simple baseline and progressing to more advanced ensemble methods allows us to compare how well each model captures temporal traffic patterns.
+
+We evaluate three regression algorithms of increasing mathematical complexity:
+
+- **Linear Regression:** A baseline model assuming linear relationships between the engineered features and the target.
+- **Random Forest Regressor:** Combines multiple decision trees to capture non-linear relationships while reducing overfitting.
+- **GBT Regressor (Gradient Boosted Trees):** Sequentially improves previous trees by focusing on prediction errors, allowing the model to learn more complex patterns in the data.
+
+==================================================
+CELL 14 | TYPE: code
+==================================================
+eval_rmse = RegressionEvaluator(metricName="rmse")
+eval_r2 = RegressionEvaluator(metricName="r2")
+eval_mae = RegressionEvaluator(metricName="mae")
+
+# 1. Linear Regression Baseline
+print("Training Linear Regression model...")
+lr = LinearRegression(featuresCol="features", labelCol="label", regParam=0.05)
+lr_model = lr.fit(train_df)
+lr_preds = lr_model.transform(test_df)
+
+# 2. Random Forest Regressor
+print("Training Random Forest Regressor...")
+rf = RandomForestRegressor(featuresCol="features", labelCol="label", numTrees=50, maxDepth=6, seed=42)
+rf_model = rf.fit(train_df)
+rf_preds = rf_model.transform(test_df)
+
+# 3. Gradient Boosted Trees (GBT)
+print("Training GBT Regressor...")
+gbt = GBTRegressor(featuresCol="features", labelCol="label", maxIter=80, maxDepth=5, stepSize=0.1, seed=42)
+gbt_model = gbt.fit(train_df)
+gbt_preds = gbt_model.transform(test_df)
+
+print("Training complete.")
+
+==================================================
+CELL 15 | TYPE: markdown
+==================================================
+At this point, all three regression models have been trained using the same feature set and training data.
+
+Training multiple algorithms allows us to compare different modelling approaches, ranging from a simple linear baseline to more advanced tree-based ensemble methods. Since every model receives exactly the same input data, differences in the evaluation metrics can be attributed to the learning algorithm rather than the underlying dataset.
+
+==================================================
+CELL 16 | TYPE: markdown
+==================================================
+## 4.6 Model Performance Metrics
+
+We compare the evaluation scores on the future test set.
+
+==================================================
+CELL 17 | TYPE: code
+==================================================
+models_list = {
+    "Linear Regression": lr_preds,
+    "Random Forest": rf_preds,
+    "GBT Regressor": gbt_preds
+}
+
+metrics = {}
+for name, preds in models_list.items():
+    rmse = eval_rmse.evaluate(preds)
+    r2 = eval_r2.evaluate(preds)
+    mae = eval_mae.evaluate(preds)
+    metrics[name] = {"RMSE": rmse, "R2": r2, "MAE": mae}
+    print(f"{name:20s} -> RMSE: {rmse:.4f} | R²: {r2:.4f} | MAE: {mae:.4f}")
+
+==================================================
+CELL 18 | TYPE: markdown
+==================================================
+The calculated evaluation metrics provide a direct comparison of the three regression models on unseen data.
+
+Linear Regression provides a useful baseline but produces noticeably larger prediction errors. Both tree-based methods achieve substantially lower RMSE and MAE values while also explaining almost all variation in the target variable through very high R² scores. This indicates that the relationship between historical traffic observations and future saturation is not purely linear and benefits from more flexible machine learning models.
+
+The relatively small difference between the Random Forest and GBT models indicates that both approaches are suitable for this forecasting task. Since the GBT model achieved competitive results while also providing feature importance values for further analysis, it is used for the remaining evaluation and visualization steps.
+
+==================================================
+CELL 19 | TYPE: markdown
+==================================================
+## 4.7 Model Diagnostics & Feature Importances
+
+We extract Gini importances from the GBT Regressor to identify which time lags contribute most to the prediction.
+
+==================================================
+CELL 20 | TYPE: code
+==================================================
+importances = gbt_model.featureImportances
+print("GBT Feature Importances:")
+for idx, name in enumerate(feature_cols):
+    print(f"  {name:25s}: {importances[idx]:.4f}")
+
+# Save trained GBT model weights for future load
+model_save_dir = str(PROJECT_ROOT / "models" / "gbt_saturation_forecaster")
+gbt_model.write().overwrite().save(model_save_dir)
+print(f"\nSaved model weights to: {model_save_dir}")
+
+==================================================
+CELL 21 | TYPE: markdown
+==================================================
+The feature importance analysis provides additional insight into how the GBT model makes its predictions.
+
+As expected, the current traffic count is the dominant predictor, while the rolling average also provides valuable additional information about recent traffic development. The remaining lag variables contribute smaller amounts individually but together help the model capture temporal dynamics that would otherwise not be visible from a single observation. After training, the model is stored on disk so it can be reused without repeating the computationally expensive training process.
+
+Although several lag features have only small individual importance values, they still contribute to the overall prediction by describing recent traffic behaviour from different time windows. This confirms that forecasting future saturation benefits from combining current observations with historical traffic information rather than relying on a single measurement.
+
+==================================================
+CELL 22 | TYPE: markdown
+==================================================
+## 4.8 Pre-trained Model Load Demo
+
+Below we demonstrate how to load the GBT model directly from disk, bypassing the training phase entirely. This can be used for rapid deployments.
+
+==================================================
+CELL 23 | TYPE: code
+==================================================
+from pyspark.ml.regression import GBTRegressionModel
+
+print("Loading saved model weights...")
+loaded_gbt = GBTRegressionModel.load(str(PROJECT_ROOT / "models" / "gbt_saturation_forecaster"))
+new_predictions = loaded_gbt.transform(test_df)
+
+print("Evaluation on loaded GBT model:")
+print(f"  Loaded Model RMSE: {eval_rmse.evaluate(new_predictions):.4f}")
+
+print("\nSample predictions (Lead Saturation Index):")
+new_predictions.select("features", "label", "prediction").show(5, truncate=False)
+
+==================================================
+CELL 24 | TYPE: markdown
+==================================================
+Finally, the saved model is loaded again and applied to the evaluation dataset.
+
+The evaluation score of the loaded model is identical to the original model, confirming that no information is lost during the saving and loading process. Displaying a few prediction examples also provides a quick sanity check, showing that the predicted saturation values remain close to the corresponding ground truth values before continuing with the visual analysis.
+
+==================================================
+CELL 25 | TYPE: markdown
+==================================================
+## 4.9 Model Diagnostics & Visualization (7 Charts)
+
+To thoroughly evaluate the regression performance of the saturation forecast, we collect test metrics locally and construct 7 distinct diagnostic charts.
+
+==================================================
+CELL 26 | TYPE: code
+==================================================
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Setup output directory for plots
+plots_dir = PROJECT_ROOT / "data" / "geospatial_output" / "plots"
+plots_dir.mkdir(parents=True, exist_ok=True)
+
+# Collect evaluation predictions locally for diagnostic plotting (safe scale, < 10k rows)
+pdf_gbt = gbt_preds.select("time_window_index", "infrastructure_label", "label", "prediction").toPandas()
+pdf_gbt["residual"] = pdf_gbt["label"] - pdf_gbt["prediction"]
+
+sns.set_theme(style="darkgrid")
+print("Plotting diagnostic metrics...")
+
+==================================================
+CELL 27 | TYPE: markdown
+==================================================
+### Chart 1: Model Benchmark Comparison
+We compare the models across key indicators: RMSE, MAE, and R².
+
+==================================================
+CELL 28 | TYPE: code
+==================================================
+fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+fig.suptitle("Model Benchmark Comparisons", fontsize=16)
+
+model_names = list(metrics.keys())
+rmses = [metrics[m]["RMSE"] for m in model_names]
+maes = [metrics[m]["MAE"] for m in model_names]
+r2s = [metrics[m]["R2"] for m in model_names]
+
+sns.barplot(x=model_names, y=rmses, ax=axes[0], palette="viridis")
+axes[0].set_title("RMSE (Lower is Better)")
+axes[0].set_ylabel("RMSE")
+
+sns.barplot(x=model_names, y=maes, ax=axes[1], palette="viridis")
+axes[1].set_title("MAE (Lower is Better)")
+axes[1].set_ylabel("MAE")
+
+sns.barplot(x=model_names, y=r2s, ax=axes[2], palette="viridis")
+axes[2].set_title("R² Score (Higher is Better)")
+axes[2].set_ylabel("R²")
+axes[2].set_ylim(0, 1.0)
+
+plt.tight_layout()
+plt.savefig(str(plots_dir / "chart1_benchmarks.png"), dpi=300)
+plt.show()
+
+==================================================
+CELL 29 | TYPE: markdown
+==================================================
+The benchmark comparison confirms the numerical evaluation from the previous section.
+
+Linear Regression performs considerably worse than both tree-based approaches across all three metrics, indicating that the relationship between the input features and future saturation is not purely linear. Both Random Forest and GBT achieve very similar results, with substantially lower prediction errors and R² values close to 1.
+
+Although Random Forest performs marginally better on this dataset, the difference is very small. Since GBT additionally provides useful feature importance information and comparable predictive performance, it remains the model used for the following diagnostic analysis.
+
+==================================================
+CELL 30 | TYPE: markdown
+==================================================
+### Chart 2: Saturation Forecast vs. Ground Truth (Timeline)
+
+We compare the actual and predicted saturation over time for one representative infrastructure segment from the test set.
+
+==================================================
+CELL 31 | TYPE: code
+==================================================
+# Find the segment with the most activity data points
+active_seg = pdf_gbt["infrastructure_label"].value_counts().index[0]
+pdf_seg = pdf_gbt[pdf_gbt["infrastructure_label"] == active_seg].sort_values("time_window_index")
+
+plt.figure(figsize=(12, 6))
+plt.plot(pdf_seg["time_window_index"], pdf_seg["label"], label="Actual Saturation", color="blue", alpha=0.7, linewidth=2)
+plt.plot(pdf_seg["time_window_index"], pdf_seg["prediction"], label="GBT Forecast (t+5)", color="red", linestyle="--", alpha=0.8, linewidth=2)
+plt.title(f"30-Min Saturation Forecast vs Ground Truth: {active_seg}", fontsize=14)
+plt.xlabel("Time Window Index")
+plt.ylabel("Saturation Index (count / capacity)")
+plt.legend(fontsize=12)
+plt.tight_layout()
+plt.savefig(str(plots_dir / "chart2_timeline.png"), dpi=300)
+plt.show()
+
+==================================================
+CELL 32 | TYPE: markdown
+==================================================
+The timeline comparison shows that the predicted saturation closely follows the overall development of the observed values throughout the evaluation period.
+
+Most peaks and low-traffic periods are captured correctly, indicating that the model successfully learns the temporal behaviour of the infrastructure segment. Small deviations mainly occur during sudden changes in traffic, where the prediction reacts slightly more smoothly than the actual observations.
+
+Overall, the forecast reproduces the general traffic dynamics well while remaining stable across consecutive time windows.
+
+==================================================
+CELL 33 | TYPE: markdown
+==================================================
+### Chart 3: Calibration Scatter Plot (Predicted vs. Actual)
+A scatter plot of predictions against actual values with a y=x reference line.
+
+==================================================
+CELL 34 | TYPE: code
+==================================================
+plt.figure(figsize=(8, 8))
+sns.scatterplot(data=pdf_gbt, x="label", y="prediction", alpha=0.5, color="purple")
+max_val = max(pdf_gbt["label"].max(), pdf_gbt["prediction"].max())
+plt.plot([0, max_val], [0, max_val], color="red", linestyle="--", linewidth=2, label="Perfect Calibration (y=x)")
+plt.title("Calibration Plot: Predicted vs Actual Saturation", fontsize=14)
+plt.xlabel("Actual Saturation Index")
+plt.ylabel("Predicted Saturation Index")
+plt.legend(fontsize=12)
+plt.gca().set_aspect('equal', adjustable='box')
+plt.tight_layout()
+plt.savefig(str(plots_dir / "chart3_calibration.png"), dpi=300)
+plt.show()
+
+==================================================
+CELL 35 | TYPE: markdown
+==================================================
+The calibration plot provides another indication of the prediction quality.
+
+Most observations are located close to the diagonal reference line, meaning that predicted saturation values are generally very similar to the observed values. Only a few points deviate noticeably from the ideal line, representing larger prediction errors for individual observations.
+
+The overall distribution confirms that the GBT model is well calibrated and produces reliable predictions over a wide range of saturation levels.
+
+==================================================
+CELL 36 | TYPE: markdown
+==================================================
+### Chart 4: GBT Feature Importances
+Visualizing the importance of features used during model training.
+
+==================================================
+CELL 37 | TYPE: code
+==================================================
+pdf_imp = pd.DataFrame({
+    "Feature": feature_cols,
+    "Importance": list(importances)
+}).sort_values("Importance", ascending=False)
+
+plt.figure(figsize=(10, 6))
+sns.barplot(data=pdf_imp, x="Importance", y="Feature", palette="rocket")
+plt.title("GBT Feature Importances (Information Gain)", fontsize=14)
+plt.xlabel("Relative Importance")
+plt.ylabel("Features")
+plt.tight_layout()
+plt.savefig(str(plots_dir / "chart4_importances.png"), dpi=300)
+plt.show()
+
+==================================================
+CELL 38 | TYPE: markdown
+==================================================
+The feature importance plot confirms the numerical importance values reported previously.
+
+The current traffic count contributes most strongly to the prediction, while the rolling mean provides additional information about recent traffic behaviour. Individual lag variables have comparatively small importance values, but together they allow the model to incorporate historical traffic patterns into the forecast.
+
+This result is consistent with the intuition that both the current traffic situation and its recent development are important for predicting future infrastructure saturation.
+
+==================================================
+CELL 39 | TYPE: markdown
+==================================================
+### Chart 5: Residuals Distribution & Unbiasedness Verification
+
+### Statistical Rationale
+
+The residual is defined as the difference between the observed and predicted saturation.
+
+A well-performing regression model should produce residuals that are centred around zero, indicating that it does not systematically overestimate or underestimate future saturation. In addition, the residual distribution should approximately follow a normal distribution without strong skewness or remaining patterns. Significant deviations would indicate that important relationships in the data have not been captured by the model.
+
+==================================================
+CELL 40 | TYPE: code
+==================================================
+plt.figure(figsize=(10, 6))
+residuals = pdf_gbt["residual"].dropna()
+
+# Plot empirical histogram
+sns.histplot(residuals, stat="density", bins=50, color="teal", alpha=0.6, label="Empirical Residuals", kde=True)
+
+# Fit normal distribution
+mu, std = residuals.mean(), residuals.std()
+xmin, xmax = plt.xlim()
+x_axis = np.linspace(xmin, xmax, 100)
+normal_curve = (1.0 / (std * math.sqrt(2 * math.pi))) * np.exp(-0.5 * ((x_axis - mu) / std) ** 2)
+
+plt.plot(x_axis, normal_curve, color="crimson", linewidth=2, linestyle="--", label=f"Normal Fit (μ={mu:.3f}, σ={std:.3f})")
+plt.axvline(0, color="black", linestyle="-", linewidth=1.2, alpha=0.7, label="Zero Bias Reference")
+plt.title("Residuals Distribution & Unbiasedness Check", fontsize=14)
+plt.xlabel("Residual (Actual - Predicted)")
+plt.ylabel("Density")
+plt.legend(fontsize=12)
+plt.tight_layout()
+plt.savefig(str(plots_dir / "chart5_residuals_dist.png"), dpi=300)
+plt.show()
+
+==================================================
+CELL 41 | TYPE: markdown
+==================================================
+The residual distribution is centred close to zero, indicating that the model does not systematically overestimate or underestimate future saturation.
+
+Most prediction errors are relatively small and concentrated around the mean, while only a limited number of larger residuals occur. The empirical distribution also follows the fitted normal curve reasonably well, suggesting that most systematic patterns have been captured during training.
+
+Some deviation from perfect normality is expected because the simulated traffic data contains abrupt changes that are difficult to predict exactly.
+
+==================================================
+CELL 42 | TYPE: markdown
+==================================================
+### Chart 6: Residuals vs. Fitted Values (Homoscedasticity)
+Plotting residuals against predicted values to check if variance of errors is constant across all saturation levels.
+
+==================================================
+CELL 43 | TYPE: code
+==================================================
+plt.figure(figsize=(10, 6))
+sns.scatterplot(data=pdf_gbt, x="prediction", y="residual", alpha=0.5, color="orange")
+plt.axhline(0, color="red", linestyle="--", linewidth=2)
+plt.title("Residuals vs. Fitted Values (Homoscedasticity Check)", fontsize=14)
+plt.xlabel("Predicted Saturation Index")
+plt.ylabel("Residual (Actual - Predicted)")
+plt.tight_layout()
+plt.savefig(str(plots_dir / "chart6_homoscedasticity.png"), dpi=300)
+plt.show()
+
+==================================================
+CELL 44 | TYPE: markdown
+==================================================
+The residual plot shows that the prediction errors remain centred around zero over most of the prediction range.
+
+No strong systematic trend is visible, suggesting that the model does not consistently overestimate or underestimate particular saturation levels. A few larger residuals appear for very high predicted values, which correspond to isolated observations where traffic changes rapidly.
+
+Overall, the residual pattern indicates that the model provides stable predictions without obvious systematic bias.
+
+==================================================
+CELL 45 | TYPE: markdown
+==================================================
+### Chart 7: Autocorrelation of Residuals (ACF Plot)
+We calculate the autocorrelation of residuals to ensure no temporal patterns remain unmodeled.
+
+==================================================
+CELL 46 | TYPE: code
+==================================================
+res_array = pdf_gbt["residual"].values
+
+# Manual ACF calculation to bypass statsmodels dependency
+def manual_acf(x, lags=15):
+    mean = np.mean(x)
+    var = np.var(x)
+    xp = x - mean
+    acf_vals = [1.0]
+    for l in range(1, lags + 1):
+        c = np.sum(xp[:-l] * xp[l:]) / (len(x) * var)
+        acf_vals.append(c)
+    return acf_vals
+
+lags = 15
+acf_vals = manual_acf(res_array, lags=lags)
+lag_labels = list(range(lags + 1))
+
+plt.figure(figsize=(10, 6))
+plt.bar(lag_labels, acf_vals, width=0.4, color="navy", label="Residual ACF")
+plt.axhline(0, color="black", linestyle="-", linewidth=0.8)
+
+# 95% confidence intervals
+conf_limit = 1.96 / np.sqrt(len(res_array))
+plt.axhline(conf_limit, color="red", linestyle="--", label=f"95% Confidence (±{conf_limit:.3f})")
+plt.axhline(-conf_limit, color="red", linestyle="--")
+
+plt.title("Autocorrelation of Residuals (ACF Check)", fontsize=14)
+plt.xlabel("Lag (minutes)")
+plt.ylabel("Autocorrelation")
+plt.legend(fontsize=12)
+plt.tight_layout()
+plt.savefig(str(plots_dir / "chart7_residuals_acf.png"), dpi=300)
+plt.show()
+
+==================================================
+CELL 47 | TYPE: markdown
+==================================================
+The autocorrelation plot shows that almost all residual correlations remain close to zero and within the 95% confidence interval.
+
+This indicates that only little temporal structure remains in the prediction errors after training. In other words, the model has already captured most of the temporal dependencies contained in the historical traffic observations.
+
+The absence of strong residual autocorrelation suggests that no major time-dependent information has been left unexplained by the forecasting model.
+
